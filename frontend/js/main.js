@@ -1,4 +1,21 @@
 
+// ========== PRE-RENDER INSTANT REDIRECT CHECK ==========
+(function() {
+    const rawPath = (window.location.pathname || '').toLowerCase();
+    const cleanPath = rawPath.split('?')[0].split('#')[0];
+    const page = cleanPath.split('/').filter(Boolean).pop() || 'index.html';
+    if (page === 'index.html' || page === 'login.html' || page === 'register.html') {
+        try {
+            const cachedRole = localStorage.getItem('skywings_auth_role');
+            if (cachedRole === 'admin') {
+                window.location.replace('admin-dashboard.html');
+            } else if (cachedRole === 'user') {
+                window.location.replace('user-dashboard.html');
+            }
+        } catch (e) {}
+    }
+})();
+
 // ========== SCROLL RESTORATION & INITIALIZATION ==========
 if (typeof window !== 'undefined' && 'scrollRestoration' in history) {
     history.scrollRestoration = 'manual';
@@ -24,13 +41,20 @@ let authState = {
     userName: null
 };
 
-document.body.classList.add('nav-loading');
+if (document.body) {
+    document.body.classList.add('nav-loading');
+}
 
 function setClientAuth(user) {
     authState.isLoggedIn = true;
     authState.userRole = user.role || null;
     authState.userId = user.userId || user.user_id || null;
     authState.userName = `${user.firstName || user.first_name || ''} ${user.lastName || user.last_name || ''}`.trim();
+    try {
+        if (user.role) {
+            localStorage.setItem('skywings_auth_role', user.role);
+        }
+    } catch (e) {}
     // Update UI
     updateNavbar();
 }
@@ -40,6 +64,7 @@ function clearClientAuth() {
     authState.userRole = null;
     authState.userId = null;
     authState.userName = null;
+    try { localStorage.removeItem('skywings_auth_role'); } catch (e) {}
     // Clean up any client-side redirect/pending flags
     try { sessionStorage.removeItem('redirectAfterLogin'); } catch (e) {}
     try { sessionStorage.removeItem('pendingFlightBooking'); } catch (e) {}
