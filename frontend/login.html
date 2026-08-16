@@ -8,6 +8,18 @@
     <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
     <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
     <link rel="stylesheet" href="css/style.css">
+    <script>
+        (function() {
+            try {
+                var role = localStorage.getItem('skywings_auth_role');
+                if (role === 'admin') {
+                    window.location.replace('admin-dashboard.html');
+                } else if (role === 'user') {
+                    window.location.replace('user-dashboard.html');
+                }
+            } catch (e) {}
+        })();
+    </script>
 </head>
 <body class="auth-page dark-mode">
     <div class="auth-layout">
