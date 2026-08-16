@@ -118,11 +118,12 @@ function getNavbarItems() {
 }
 
 function setActiveNavLink(navMenu) {
-    const currentPath = window.location.pathname.split('/').pop().toLowerCase();
+    const currentPage = getNormalizedPage();
     navMenu.querySelectorAll('a').forEach(link => {
         link.classList.remove('active');
-        const linkPath = link.getAttribute('href')?.split('/').pop().toLowerCase();
-        if (linkPath === currentPath || (currentPath === '' && linkPath === 'index.html')) {
+        const href = link.getAttribute('href') || '';
+        const linkPath = href.split('?')[0].split('#')[0].split('/').filter(Boolean).pop() || 'index.html';
+        if (linkPath === currentPage) {
             link.classList.add('active');
         }
     });
@@ -278,52 +279,67 @@ function requireAuth(requiredRole = null) {
     return true;
 }
 
+function getNormalizedPage() {
+    const rawPath = (window.location.pathname || '').toLowerCase();
+    const cleanPath = rawPath.split('?')[0].split('#')[0];
+    const segments = cleanPath.split('/').filter(Boolean);
+    const lastSegment = segments.pop() || '';
+    if (!lastSegment || lastSegment === 'index.html') {
+        return 'index.html';
+    }
+    return lastSegment;
+}
+
+function isAuthOrLandingPage(page) {
+    const p = page || getNormalizedPage();
+    return p === 'index.html' || p === 'login.html' || p === 'register.html';
+}
+
+function isAdminRoute(page) {
+    const p = page || getNormalizedPage();
+    return p.startsWith('admin-') || p.includes('admin-');
+}
+
+function isUserProtectedRoute(page) {
+    const p = page || getNormalizedPage();
+    return (
+        p.startsWith('user-') ||
+        p.includes('user-') ||
+        p === 'my-bookings.html' ||
+        p.includes('my-bookings') ||
+        p === 'check-in.html' ||
+        p.includes('check-in')
+    );
+}
+
 function getCurrentPageInfo() {
-    const currentPath = window.location.pathname.toLowerCase();
-    const currentFile = currentPath.split('/').pop() || currentPath;
-    const currentHref = window.location.href.toLowerCase();
-    return { currentFile, currentHref };
+    const currentPath = (window.location.pathname || '').toLowerCase();
+    const currentFile = getNormalizedPage();
+    const currentHref = (window.location.href || '').toLowerCase();
+    return { currentFile, currentHref, currentPath };
 }
 
 function isProtectedRoute(currentFile, currentHref) {
-    return (
-        currentFile.includes('user-') ||
-        currentHref.includes('user-') ||
-        currentFile.includes('admin-') ||
-        currentHref.includes('admin-') ||
-        currentFile === 'my-bookings.html' ||
-        currentHref.includes('my-bookings') ||
-        currentFile === 'check-in.html' ||
-        currentHref.includes('check-in') ||
-        currentFile === 'user-dashboard.html' ||
-        currentHref.includes('user-dashboard') ||
-        currentFile === 'user-profile.html' ||
-        currentHref.includes('user-profile')
-    );
+    const page = currentFile ? (currentFile.split('?')[0].split('/').filter(Boolean).pop() || 'index.html') : getNormalizedPage();
+    return isAdminRoute(page) || isUserProtectedRoute(page);
 }
 
 function isLoginOrLandingPage(currentFile, currentHref) {
-    return (
-        currentFile === 'login.html' ||
-        currentFile === 'register.html' ||
-        currentFile === 'index.html' ||
-        currentHref.includes('login.html') ||
-        currentHref.includes('register.html') ||
-        currentHref.endsWith('index.html')
-    );
+    const page = currentFile ? (currentFile.split('?')[0].split('/').filter(Boolean).pop() || 'index.html') : getNormalizedPage();
+    return isAuthOrLandingPage(page);
 }
 
 async function handlePageRestore() {
-    const { currentFile, currentHref } = getCurrentPageInfo();
+    const page = getNormalizedPage();
     await fetchAuthStatus();
     updateNavbar();
 
-    if (!authState.isLoggedIn && isProtectedRoute(currentFile, currentHref)) {
+    if (!authState.isLoggedIn && (isAdminRoute(page) || isUserProtectedRoute(page))) {
         window.location.replace('login.html');
         return;
     }
 
-    if (authState.isLoggedIn && isLoginOrLandingPage(currentFile, currentHref)) {
+    if (authState.isLoggedIn && isAuthOrLandingPage(page)) {
         if (authState.userRole === 'admin') {
             window.location.replace('admin-dashboard.html');
         } else {
@@ -358,68 +374,57 @@ window.addEventListener('popstate', function() {
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', async function() {
-    // Check authentication for protected pages
-    const currentPath = window.location.pathname.toLowerCase();
-    const currentFile = currentPath.split('/').pop() || currentPath;
-    const currentHref = window.location.href.toLowerCase();
+    const page = getNormalizedPage();
+    const currentHref = (window.location.href || '').toLowerCase();
+    const currentFile = page;
     
-    // REMOVED AUTO-LOGIN: No automatic redirect from login/register pages
-    // Users must manually log in every time
-    // Only clear auth data on login/register page load if there's no token
-    // This prevents clearing data right after successful login
-    // Populate auth state from server (httpOnly cookie)
+    // Check authentication and populate auth state from server (httpOnly cookie)
     await fetchAuthStatus();
 
-    // Populate all Origin & Destination dropdowns dynamically from database with mutual exclusion
-    await initializeAllAirportDropdowns();
-
-    if (currentFile === 'login.html' || currentFile === 'register.html' || currentFile === 'index.html' || currentFile === '' ||
-        currentHref.includes('login.html') || currentHref.includes('register.html') || currentHref.endsWith('index.html')) {
-        // If server says user is logged in, redirect them away from login/register
-        if (authState.isLoggedIn) {
-            if (authState.userRole === 'admin') {
-                window.location.replace('admin-dashboard.html');
-            } else {
-                window.location.replace('user-dashboard.html');
-            }
-            return;
+    // If logged in and accessing landing (index.html), login, or register page:
+    // immediately redirect to the respective dashboard based on role
+    if (authState.isLoggedIn && isAuthOrLandingPage(page)) {
+        if (authState.userRole === 'admin') {
+            window.location.replace('admin-dashboard.html');
+        } else {
+            window.location.replace('user-dashboard.html');
         }
-        // Not logged in - ensure client state is clean
+        return;
+    }
+
+    // If not logged in and on landing/auth page, ensure client auth state is clean
+    if (!authState.isLoggedIn && isAuthOrLandingPage(page)) {
         clearClientAuth();
     }
     
     // Admin pages - require admin role
-    if (currentFile.includes('admin-') || currentHref.includes('admin-') ||
-        currentFile === 'admin-dashboard.html' || currentHref.includes('admin-dashboard') ||
-        currentFile === 'admin-management.html' || currentHref.includes('admin-management') ||
-        currentFile === 'admin-reports.html' || currentHref.includes('admin-reports')) {
+    if (isAdminRoute(page)) {
         if (!requireAuth('admin')) {
             return; // Stop execution if not authenticated
         }
     }
     
     // User pages - require user authentication
-    if (currentFile.includes('user-') || currentHref.includes('user-') ||
-        currentFile === 'my-bookings.html' || currentHref.includes('my-bookings') ||
-        currentFile === 'check-in.html' || currentHref.includes('check-in') ||
-        currentFile === 'user-dashboard.html' || currentHref.includes('user-dashboard') ||
-        currentFile === 'user-profile.html' || currentHref.includes('user-profile') ||
-        currentFile === 'flight-search.html' || currentHref.includes('flight-search')) {
-        // For flight-search, check if user is logged in, but don't require it (allow guest access)
-        const isLoggedIn = !!authState.isLoggedIn;
-        const userRole = authState.userRole;
-        
-        if (currentFile === 'flight-search.html' || currentHref.includes('flight-search')) {
-            // Allow guest access but update navbar based on auth status
-            updateNavbar();
-            initFlightSearchFromUrl();
-        } else {
-            // Other user pages require authentication
-            if (!requireAuth('user')) {
-                return; // Stop execution if not authenticated
-            }
+    if (isUserProtectedRoute(page)) {
+        if (!requireAuth('user')) {
+            return; // Stop execution if not authenticated
         }
     }
+
+    // Flight search page - allow guest access but update navbar based on auth status
+    if (page === 'flight-search.html') {
+        updateNavbar();
+        initFlightSearchFromUrl();
+    }
+
+    // About & Contact page routing based on login status
+    if (page === 'about-contact.html' && authState.isLoggedIn && authState.userRole === 'user') {
+        window.location.replace('user-about-contact.html');
+        return;
+    }
+
+    // Populate all Origin & Destination dropdowns dynamically from database with mutual exclusion
+    await initializeAllAirportDropdowns();
     
     // Homepage quick search is permanently active and accessible for all users (guests & authenticated)
 
@@ -1471,7 +1476,14 @@ function checkPasswordStrength(input) {
     }
 }
 
-async function handleLogout() {
+async function handleLogout(event) {
+    if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+    }
+    if (typeof window !== 'undefined' && window.event && typeof window.event.preventDefault === 'function') {
+        try { window.event.preventDefault(); } catch (e) {}
+    }
+
     // Prevent multiple simultaneous logout attempts
     if (tokenValidationInProgress) {
         return;
