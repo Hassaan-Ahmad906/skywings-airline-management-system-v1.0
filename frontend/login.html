@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - SkyWings Airlines</title>
+    <link rel="icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-page dark-mode">
+    <div class="auth-layout">
+        <section class="auth-panel auth-panel--brand">
+            <a href="index.html" class="brand-link" aria-label="SkyWings Airlines homepage">
+                <img src="images/transparent_logo.PNG" alt="SkyWings" class="auth-brand-logo">
+                <div class="brand-lockup">
+                    <p class="eyebrow">SkyWings Airlines</p>
+                    <h1>Sign in to your account</h1>
+                </div>
+            </a>
+            <p class="panel-copy">Access your booking dashboard quickly with a secure, modern login experience.</p>
+        </section>
+
+        <section class="auth-panel auth-panel--form">
+            <div class="auth-card">
+                <div class="auth-header">
+                    <p class="eyebrow">Welcome back</p>
+                    <h2>Login</h2>
+                </div>
+
+                <form class="auth-form auth-form--spacious" onsubmit="handleLogin(event)">
+                    <div class="form-group">
+                        <label for="email">Email address</label>
+                        <input id="email" type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input id="password" type="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+                        <a href="#" class="forgot-link" onclick="alert('Password reset feature coming soon!'); return false;">Forgot password?</a>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+                </form>
+
+                <div class="auth-footer">
+                    <p>New to SkyWings? <a href="register.html">Create account</a></p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
+

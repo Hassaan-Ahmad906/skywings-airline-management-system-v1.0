@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Bookings - SkyWings Airlines</title>
+    <link rel="icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" class="brand-link" aria-label="SkyWings home">
+                    <img src="images/transparent_logo.PNG" alt="SkyWings" class="nav-logo">
+                    <span class="brand-name">SkyWings</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="user-dashboard.html">Dashboard</a></li>
+                <li><a href="flight-search.html">Book Flight</a></li>
+                <li><a href="my-bookings.html" class="active">My Bookings</a></li>
+                <li><a href="check-in.html">Check-in</a></li>
+                <li><a href="user-about-contact.html">About & Contact</a></li>
+                <li><a href="user-profile.html">Profile</a></li>
+                <li><a href="index.html" onclick="handleLogout()">Logout</a></li>
+            </ul>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="page-header">
+        <div class="container">
+            <h1>My Bookings</h1>
+            <p>View and manage your flight bookings</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Filter Tabs -->
+        <div class="filter-tabs">
+            <button class="tab-btn active" data-filter="all" onclick="filterBookings(event, 'all')">All Bookings</button>
+            <button class="tab-btn" data-filter="upcoming" onclick="filterBookings(event, 'upcoming')">✈️ Upcoming</button>
+            <button class="tab-btn" data-filter="boarded" onclick="filterBookings(event, 'boarded')">✈️ Boarded</button>
+            <button class="tab-btn" data-filter="missed" onclick="filterBookings(event, 'missed')">⚠️ Missed</button>
+            <button class="tab-btn" data-filter="pending" onclick="filterBookings(event, 'pending')">⏳ Unpaid Holds</button>
+            <button class="tab-btn" data-filter="cancelled" onclick="filterBookings(event, 'cancelled')">🚫 Cancelled</button>
+        </div>
+
+        <!-- Bookings List -->
+        <div class="bookings-list" id="bookingsList">
+            <div class="empty-state">
+                <p>Loading bookings...</p>
+            </div>
+        </div>
+
+        <div class="empty-state" id="bookingsEmptyState" style="display: none;">
+            <p>No bookings found for this filter.</p>
+            <p><a href="flight-search.html">Find your next flight</a></p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
+
