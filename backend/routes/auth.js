@@ -33,14 +33,15 @@ router.post('/register', [
     return true;
   }),
   body('phone')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .matches(/^[\d\s\-\+\(\)]+$/).withMessage('Invalid phone number format')
     .isLength({ max: 20 }).withMessage('Phone number is too long'),
   body('dob')
-    .optional()
+    .optional({ values: 'falsy' })
     .isISO8601().withMessage('Invalid date format')
     .custom((value) => {
+      if (!value) return true;
       const dob = new Date(value);
       const today = new Date();
       const age = today.getFullYear() - dob.getFullYear();
@@ -50,7 +51,7 @@ router.post('/register', [
       return true;
     }),
   body('address')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ max: 500 }).withMessage('Address is too long')
 ], async (req, res) => {
