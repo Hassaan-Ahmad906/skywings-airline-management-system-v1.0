@@ -34,7 +34,14 @@ router.get('/search', async (req, res) => {
           WHEN ? = 'business' THEN f.business_price
           WHEN ? = 'first' THEN f.first_class_price
           ELSE f.base_price
-        END as price
+        END as price,
+        GREATEST(
+          0,
+          COALESCE(a.capacity, 150) - GREATEST(
+            COALESCE((SELECT SUM(b.number_of_passengers) FROM bookings b WHERE b.flight_id = f.flight_id AND b.status IN ('CONFIRMED', 'CHECKED_IN', 'BOARDED', 'PENDING')), 0),
+            COALESCE((SELECT COUNT(*) FROM flight_seat_allocations fsa WHERE fsa.flight_id = f.flight_id), 0)
+          )
+        ) as available_seats
       FROM flights f
       INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
@@ -63,26 +70,7 @@ router.get('/search', async (req, res) => {
 
     const flights = await query(sql, params);
 
-    // Calculate real available seats for each flight from bookings and seat allocations
     for (let flight of flights) {
-      const bookedPaxRows = await query(
-        `SELECT COALESCE(SUM(b.number_of_passengers), 0) as booked_pax
-         FROM bookings b
-         WHERE b.flight_id = ? AND b.status IN ('CONFIRMED', 'CHECKED_IN', 'BOARDED', 'PENDING')`,
-        [flight.flight_id]
-      );
-      const allocatedSeatRows = await query(
-        `SELECT COUNT(*) as allocated_seats
-         FROM flight_seat_allocations
-         WHERE flight_id = ?`,
-        [flight.flight_id]
-      );
-
-      const bookedPax = parseInt(bookedPaxRows[0]?.booked_pax) || 0;
-      const allocatedSeats = parseInt(allocatedSeatRows[0]?.allocated_seats) || 0;
-      const totalOccupied = Math.max(bookedPax, allocatedSeats);
-
-      flight.available_seats = Math.max(0, (flight.capacity || 150) - totalOccupied);
       flight.total_price = parseFloat(flight.price) * parseInt(passengers);
     }
 
