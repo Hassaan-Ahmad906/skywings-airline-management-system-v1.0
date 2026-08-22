@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Flights - SkyWings Airlines</title>
+    <link rel="icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" class="brand-link" aria-label="SkyWings home">
+                    <img src="images/transparent_logo.PNG" alt="SkyWings" class="nav-logo">
+                    <span class="brand-name">SkyWings</span>
+                </a>
+            </div>
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="flight-search.html" class="active">Flights</a></li>
+                <li><a href="about-contact.html">About & Contact</a></li>
+                <li><a href="login.html" class="btn-login">Login</a></li>
+                <li><a href="register.html" class="btn-register">Sign Up</a></li>
+            </ul>
+            <script>
+                (function() {
+                    try {
+                        var role = localStorage.getItem('skywings_auth_role');
+                        var nav = document.getElementById('navMenu');
+                        if (nav) {
+                            if (role === 'user') {
+                                nav.innerHTML = '<li><a href="user-dashboard.html">Dashboard</a></li>' +
+                                                '<li><a href="flight-search.html" class="active">Book Flight</a></li>' +
+                                                '<li><a href="my-bookings.html">My Bookings</a></li>' +
+                                                '<li><a href="check-in.html">Check-in</a></li>' +
+                                                '<li><a href="user-about-contact.html">About & Contact</a></li>' +
+                                                '<li><a href="user-profile.html">Profile</a></li>' +
+                                                '<li id="authNavItem"><a href="index.html" onclick="handleLogout(); return false;">Logout</a></li>';
+                            } else if (role === 'admin') {
+                                nav.innerHTML = '<li><a href="admin-dashboard.html">Dashboard</a></li>' +
+                                                '<li><a href="admin-management.html">Management</a></li>' +
+                                                '<li><a href="admin-reports.html">Reports</a></li>' +
+                                                '<li id="authNavItem"><a href="index.html" onclick="handleLogout(); return false;">Logout</a></li>';
+                            }
+                        }
+                    } catch (e) {}
+                })();
+            </script>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Search Section -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Flights</h1>
+            <p>Search flights or check flight status</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Tabs -->
+        <div class="filter-tabs">
+            <button class="tab-btn active" onclick="showTab(event, 'search')">🔍 Search & Book Flights</button>
+            <button class="tab-btn" onclick="showTab(event, 'status')">📡 Live Flight Status</button>
+        </div>
+
+        <!-- Search Tab -->
+        <div id="searchTab" class="tab-content">
+            <div class="search-panel">
+                <!-- Trip Type Pills -->
+                <div class="trip-type-selector">
+                    <button type="button" class="trip-pill active" onclick="setTripType(this, 'round')">✈️ Round Trip</button>
+                    <button type="button" class="trip-pill" onclick="setTripType(this, 'oneway')">➡️ One Way</button>
+                    <!-- <button type="button" class="trip-pill" onclick="setTripType(this, 'multicity')">🔀 Multi-City</button> -->
+                </div>
+
+                <form class="search-form detailed" id="flightSearchForm" onsubmit="handleFlightSearch(event)">
+                    <!-- Route Selection with Swap Button -->
+                    <div class="form-row route-row-grid">
+                        <div class="form-group flex-1">
+                            <label for="searchFromAirport">🛫 Origin (From)</label>
+                            <select name="from" id="searchFromAirport" required>
+                                <option value="">Select Origin City</option>
+                            </select>
+                        </div>
+
+                        <!-- Route Swap Button -->
+                        <div class="route-swap-container">
+                            <button type="button" class="btn-swap-airports" id="btnSwapAirports" title="Swap Origin and Destination" onclick="swapSearchAirports()">⇄</button>
+                        </div>
+
+                        <div class="form-group flex-1">
+                            <label for="searchToAirport">🛬 Destination (To)</label>
+                            <select name="to" id="searchToAirport" required>
+                                <option value="">Select Destination City</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Dates Selection -->
+                    <div class="form-row dates-row">
+                        <div class="form-group flex-1">
+                            <label for="searchDepDate">📅 Departure Date</label>
+                            <input type="date" name="departure" id="searchDepDate" required>
+                        </div>
+                        <div class="form-group flex-1" id="returnDateFieldGroup">
+                            <label for="searchReturnDate">📅 Return Date (Optional)</label>
+                            <input type="date" name="return" id="searchReturnDate">
+                        </div>
+                    </div>
+
+                    <!-- Quick Date Chips Bar -->
+                    <div class="quick-date-chips-bar">
+                        <span class="chips-label">Quick Departures:</span>
+                        <span class="date-chip" onclick="setQuickDate('today')">📅 Today</span>
+                        <span class="date-chip" onclick="setQuickDate('tomorrow')">📅 Tomorrow</span>
+                        <span class="date-chip" onclick="setQuickDate('weekend')">🌴 This Weekend</span>
+                        <span class="date-chip" onclick="setQuickDate('plus3')">✨ +3 Days</span>
+                    </div>
+                    
+                    <!-- Passengers & Cabin Class -->
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label for="searchPassengers">👤 Passengers</label>
+                            <select name="passengers" id="searchPassengers" required>
+                                <option value="1">1 Passenger (Adult)</option>
+                                <option value="2">2 Passengers</option>
+                                <option value="3">3 Passengers</option>
+                                <option value="4">4 Passengers</option>
+                                <option value="5">5 Passengers</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label for="searchCabinClass">💎 Cabin Class</label>
+                            <select name="class" id="searchCabinClass" required>
+                                <option value="economy">Economy Class</option>
+                                <option value="business">Business Class</option>
+                                <option value="first">First Class</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-block search-submit-btn">
+                        <span>🔍 Find & Compare Flights</span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Search Results -->
+            <div class="search-results" id="searchResults" style="display: none;">
+                <!-- Sort & Filter Bar -->
+                <div class="results-header-bar">
+                    <div>
+                        <h2 id="searchResultsTitle" style="margin: 0; font-size: 1.4rem; color: #f8fafc;">Available Flights</h2>
+                        <p id="searchResultsSubtitle" style="margin: 4px 0 0 0; color: #94a3b8; font-size: 0.88rem;">Real-time scheduled departures with instant confirmation</p>
+                    </div>
+                    <div class="sort-controls">
+                        <span style="font-size: 0.82rem; color: #94a3b8; font-weight: 700;">Sort By:</span>
+                        <button type="button" class="sort-chip active" onclick="sortFlightResults('price')">💵 Lowest Price</button>
+                        <button type="button" class="sort-chip" onclick="sortFlightResults('duration')">⚡ Shortest Duration</button>
+                        <button type="button" class="sort-chip" onclick="sortFlightResults('departure')">🌅 Earliest Departure</button>
+                    </div>
+                </div>
+
+                <div class="flights-list" id="flightsList">
+                    <!-- Flight results will be populated dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Tab -->
+        <div id="statusTab" class="tab-content" style="display: none;">
+            <div class="search-panel">
+                <div style="margin-bottom: 1.5rem;">
+                    <h2 style="font-size: 1.35rem; color: #f8fafc; margin: 0 0 4px 0;">Live Flight Radar & Tracker</h2>
+                    <p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">Track real-time departures, arrivals, terminal gates, and baggage status.</p>
+                </div>
+                <form class="search-form" onsubmit="handleStatusSearch(event)">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>Flight Number</label>
+                            <input type="text" name="flightNumber" id="statusFlightInput" placeholder="e.g., FL101, SW202" required style="text-transform: uppercase;">
+                        </div>
+                        <div class="form-group" style="align-self: flex-end;">
+                            <button type="submit" class="btn btn-primary" style="padding: 12px 24px; font-weight: 700;">Track Flight Status</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="status-result" id="statusResult" style="display: none;">
+                <!-- Flight status will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Booking Modal -->
+    <div class="modal" id="bookingModal" style="display: none;">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="bookingModalTitle">Complete Your Booking</h2>
+                <span class="close" onclick="closeBookingModal()">&times;</span>
+            </div>
+            <form class="modal-form" id="bookingForm" onsubmit="handleBookingSubmit(event)">
+                <input type="hidden" id="bookingFlightId" name="flightId">
+                <input type="hidden" id="bookingFlightClass" name="class">
+                <input type="hidden" id="bookingNumPassengers" name="numPassengers">
+                
+                <div id="passengerForms">
+                    <!-- Passenger forms and unified action buttons will be generated dynamically by js/main.js -->
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
+
