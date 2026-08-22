@@ -925,7 +925,7 @@ router.post('/aircraft', [
   body('capacity')
     .isInt({ min: 1, max: 1000 }).withMessage('Capacity must be between 1 and 1000'),
   body('status')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['active', 'maintenance', 'retired']).withMessage('Invalid status')
 ], async (req, res) => {
   try {
@@ -941,19 +941,19 @@ router.post('/aircraft', [
     const { model, registration, capacity, status = 'active' } = req.body;
 
     // Check if registration already exists
-    const existing = await queryOne(
+    const existingAircraft = await queryOne(
       'SELECT aircraft_id FROM aircraft WHERE registration = ?',
       [registration.toUpperCase()]
     );
 
-    if (existing) {
+    if (existingAircraft) {
       return res.status(409).json({
         success: false,
-        message: 'Aircraft registration already exists'
+        message: 'Aircraft with this registration already exists'
       });
     }
 
-    const [result] = await require('../config/database').pool.execute(
+    const [result] = await pool.execute(
       `INSERT INTO aircraft (model, registration, capacity, status)
        VALUES (?, ?, ?, ?)`,
       [model, registration.toUpperCase(), parseInt(capacity), status]
@@ -962,7 +962,13 @@ router.post('/aircraft', [
     res.status(201).json({
       success: true,
       message: 'Aircraft created successfully',
-      data: { aircraft_id: result.insertId }
+      data: {
+        aircraftId: result.insertId,
+        model,
+        registration: registration.toUpperCase(),
+        capacity: parseInt(capacity),
+        status
+      }
     });
   } catch (error) {
     console.error('Create aircraft error:', error);
@@ -976,21 +982,21 @@ router.post('/aircraft', [
 // Update aircraft
 router.put('/aircraft/:id', [
   body('model')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .notEmpty().withMessage('Model cannot be empty')
     .isLength({ max: 100 }).withMessage('Model name is too long'),
   body('registration')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .notEmpty().withMessage('Registration cannot be empty')
     .isLength({ max: 20 }).withMessage('Registration is too long')
     .matches(/^[A-Z0-9\-]+$/).withMessage('Registration must contain only uppercase letters, numbers, and hyphens'),
   body('capacity')
-    .optional()
+    .optional({ values: 'falsy' })
     .isInt({ min: 1, max: 1000 }).withMessage('Capacity must be between 1 and 1000'),
   body('status')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['active', 'maintenance', 'retired']).withMessage('Invalid status')
 ], async (req, res) => {
   try {
