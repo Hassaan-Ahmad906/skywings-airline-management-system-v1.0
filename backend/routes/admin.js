@@ -101,10 +101,10 @@ router.get('/stats', async (req, res) => {
       WHERE departure_datetime >= DATE(CURRENT_TIMESTAMP) AND LOWER(status) IN ("scheduled", "in_air", "boarding")
     `);
     const [allBookings] = await query('SELECT COUNT(*) as total FROM bookings');
-    const [confirmedBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) = "confirmed"');
+    const [confirmedBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) IN ("confirmed", "checked_in", "boarded", "completed")');
     const [pendingBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) = "pending"');
     const [cancelledBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) = "cancelled"');
-    const [revenue] = await query('SELECT COALESCE(SUM(total_amount), 0) as revenue FROM bookings WHERE LOWER(status) = "confirmed" AND payment_status = "paid"');
+    const [revenue] = await query('SELECT COALESCE(SUM(total_amount), 0) as revenue FROM bookings WHERE LOWER(status) IN ("confirmed", "checked_in", "boarded", "completed") AND payment_status = "paid"');
     const [activeAircraft] = await query('SELECT COUNT(*) as total FROM aircraft WHERE status = "active"');
 
     res.json({
@@ -1331,7 +1331,7 @@ router.get('/hot-flights', async (req, res) => {
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
        INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
        INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
-       LEFT JOIN bookings b ON f.flight_id = b.flight_id AND b.status = 'confirmed'
+       LEFT JOIN bookings b ON f.flight_id = b.flight_id AND LOWER(b.status) IN ('confirmed', 'checked_in', 'boarded', 'completed')
        WHERE f.departure_datetime >= CURRENT_DATE
        GROUP BY f.flight_id, f.flight_number, f.departure_datetime, f.arrival_datetime, 
                 f.status, f.base_price, f.business_price, f.first_class_price,
