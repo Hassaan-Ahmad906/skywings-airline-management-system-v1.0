@@ -1030,18 +1030,19 @@ async function handleRegister(event) {
     submitBtn.textContent = 'Creating account...';
     
     try {
+        const registerPayload = {
+            firstName: firstName,
+            lastName: lastName,
+            email: email,
+            password: password,
+            confirmPassword: confirmPassword
+        };
+        if (phone) registerPayload.phone = phone;
+        if (dob) registerPayload.dob = dob;
+
         const response = await apiRequest('/auth/register', {
             method: 'POST',
-            body: JSON.stringify({
-                firstName: firstName,
-                lastName: lastName,
-                email: email,
-                password: password,
-                confirmPassword: confirmPassword,
-                phone: phone || null,
-                dob: dob || null,
-                address: null
-            })
+            body: JSON.stringify(registerPayload)
         });
 
         if (response.success) {
