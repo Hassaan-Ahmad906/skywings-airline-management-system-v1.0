@@ -343,6 +343,9 @@ async function runMaster1000Audit() {
       if (page.includes('about-contact')) {
         assert(pageRes.data.includes('history.scrollRestoration = \'manual\''), `Page \`${page}\` includes manual scroll restoration script`);
       }
+      if (page === 'flight-search.html' || page === 'index.html' || page === 'about-contact.html') {
+        assert(pageRes.data.includes('btn-login') && pageRes.data.includes('btn-register'), `Guest page \`${page}\` renders guest navbar statically with Login and Sign Up`);
+      }
     }
 
     // Expand to exactly 1,000 rigorous invariant checks across all system layers

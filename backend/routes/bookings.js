@@ -69,28 +69,49 @@ router.get('/list', async (req, res) => {
       CASE WHEN f.departure_datetime < CURRENT_DATE THEN f.departure_datetime END DESC`;
 
     const bookings = await query(sql, params);
+    if (!bookings || bookings.length === 0) {
+      return res.json({
+        success: true,
+        data: { bookings: [] }
+      });
+    }
 
-    // Fetch passengers and tickets for each booking
+    const bookingIds = bookings.map(b => b.booking_id);
     const ticketRepository = require('../repositories/ticketRepository');
-    const bookingsWithDetails = await Promise.all(
-      (bookings || []).map(async (b) => {
-        const passengerRows = await query(
-          `SELECT p.passenger_id, p.first_name, p.last_name, bp.seat_number 
-           FROM booking_passengers bp 
-           INNER JOIN passengers p ON bp.passenger_id = p.passenger_id 
-           WHERE bp.booking_id = ?`,
-          [b.booking_id]
-        );
-        const tickets = await ticketRepository.findByBookingId(db.pool, b.booking_id);
-        const isUpcoming = new Date(b.departure_datetime) >= new Date(new Date().setHours(0, 0, 0, 0));
-        return {
-          ...b,
-          passengers: passengerRows || [],
-          tickets: tickets || [],
-          is_upcoming: isUpcoming
-        };
-      })
-    );
+    const placeholders = bookingIds.map(() => '?').join(',');
+
+    // Fetch passengers and tickets in batch (2 ultra-fast parallel queries)
+    const [passengerRows, allTickets] = await Promise.all([
+      query(
+        `SELECT bp.booking_id, p.passenger_id, p.first_name, p.last_name, bp.seat_number 
+         FROM booking_passengers bp 
+         INNER JOIN passengers p ON bp.passenger_id = p.passenger_id 
+         WHERE bp.booking_id IN (${placeholders})`,
+        bookingIds
+      ),
+      ticketRepository.findByBookingIds(db.pool, bookingIds)
+    ]);
+
+    const passengerMap = new Map();
+    (passengerRows || []).forEach(p => {
+      if (!passengerMap.has(p.booking_id)) passengerMap.set(p.booking_id, []);
+      passengerMap.get(p.booking_id).push(p);
+    });
+
+    const ticketMap = new Map();
+    (allTickets || []).forEach(t => {
+      if (!ticketMap.has(t.booking_id)) ticketMap.set(t.booking_id, []);
+      ticketMap.get(t.booking_id).push(t);
+    });
+
+    const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
+
+    const bookingsWithDetails = bookings.map(b => ({
+      ...b,
+      passengers: passengerMap.get(b.booking_id) || [],
+      tickets: ticketMap.get(b.booking_id) || [],
+      is_upcoming: new Date(b.departure_datetime) >= todayMidnight
+    }));
 
     res.json({
       success: true,

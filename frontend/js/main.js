@@ -24,6 +24,15 @@ let authState = {
     userName: null
 };
 
+// Synchronously initialize authState from cached session role for immediate zero-flicker UI render
+try {
+    const cachedRole = localStorage.getItem('skywings_auth_role');
+    if (cachedRole === 'user' || cachedRole === 'admin') {
+        authState.isLoggedIn = true;
+        authState.userRole = cachedRole;
+    }
+} catch (e) {}
+
 if (document.body) {
     document.body.classList.add('nav-loading');
 }
@@ -110,8 +119,8 @@ function getNavbarItems() {
             { href: 'flight-search.html', text: 'Book Flight' },
             { href: 'my-bookings.html', text: 'My Bookings' },
             { href: 'check-in.html', text: 'Check-in' },
-            { href: 'user-profile.html', text: 'Profile' },
             { href: 'user-about-contact.html', text: 'About & Contact' },
+            { href: 'user-profile.html', text: 'Profile' },
             { href: 'index.html', text: 'Logout', onclick: 'handleLogout(); return false;' }
         ];
     }
@@ -425,6 +434,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
+    // User dashboard page - immediately fetch and populate metrics & bookings
+    if (page === 'user-dashboard.html') {
+        loadUserDashboardData();
+    }
+
     // Flight search page - allow guest access but update navbar based on auth status
     if (page === 'flight-search.html') {
         updateNavbar();
@@ -722,14 +736,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
-    // Load dashboard data if on dashboard page
-    if (window.location.pathname.includes('dashboard')) {
-        loadDashboardData();
-        if (window.location.pathname.includes('user-dashboard')) {
-            loadUserDashboardData();
-        } else if (window.location.pathname.includes('admin-dashboard')) {
-            loadAdminDashboard();
-        }
+    // Load dashboard data if on dashboard page (if not already initiated)
+    const curPage = getNormalizedPage();
+    if (curPage === 'admin-dashboard.html' || window.location.pathname.includes('admin-dashboard')) {
+        loadAdminDashboard();
     }
     
     // Update navbar based on login status
@@ -1602,6 +1612,9 @@ function bindAirportPairSync(fromSelect, toSelect, fromPlaceholder = 'Select Ori
 }
 
 async function initializeAllAirportDropdowns() {
+    const hasAirportSelect = document.querySelector('select[name="from"], select[name="to"], #searchFromAirport, #searchToAirport');
+    if (!hasAirportSelect) return;
+
     await fetchDatabaseAirports();
     if (!cachedAirportsList || cachedAirportsList.length === 0) return;
     
@@ -2071,7 +2084,20 @@ function bookFlight(flightId, price, flightClass = 'economy', numPassengers = 1)
         return;
     }
     
-    // Get flight details
+    // Instantly retrieve flight from current in-memory search results for 0ms modal pop-up
+    const cachedFlight = Array.isArray(currentSearchResults) 
+        ? currentSearchResults.find(f => Number(f.flight_id) === Number(flightId)) 
+        : null;
+
+    if (cachedFlight) {
+        currentBookingFlight = cachedFlight;
+        currentBookingClass = flightClass;
+        currentBookingPassengers = numPassengers;
+        showBookingModal(flightId, price, flightClass, numPassengers);
+        return;
+    }
+    
+    // Fallback: If not found in current search results, fetch flight details
     apiRequest(`/flights/${flightId}`).then(response => {
         if (response.success && response.data.flight) {
             currentBookingFlight = response.data.flight;
@@ -2267,39 +2293,11 @@ async function handleBookingSubmit(event) {
 // ========== DASHBOARD ==========
 
 async function loadDashboardData() {
-    const userRole = authState.userRole;
-    
-    try {
-        if (userRole === 'admin') {
-            // Load admin stats
-            const response = await apiRequest('/admin/stats');
-            if (response.success && response.data) {
-                const stats = response.data;
-                updateElement('totalUsers', stats.totalUsers);
-                updateElement('totalFlights', stats.totalFlights);
-                updateElement('totalBookings', stats.totalBookings);
-                updateElement('totalRevenue', `$${stats.totalRevenue.toLocaleString()}`);
-            }
-        } else {
-            // Load user bookings stats
-            const response = await apiRequest('/bookings/list');
-            if (response.success && response.data) {
-                const bookings = response.data.bookings || [];
-                const confirmed = bookings.filter(b => ['confirmed', 'checked_in', 'boarded'].includes((b.status || '').toLowerCase())).length;
-                const completed = bookings.filter(b => (b.status || '').toLowerCase() === 'completed').length;
-                const totalSpent = bookings
-                    .filter(b => ['confirmed', 'checked_in', 'boarded', 'completed'].includes((b.status || '').toLowerCase()))
-                    .reduce((sum, b) => sum + parseFloat(b.total_amount || 0), 0);
-                
-                updateElement('totalBookings', bookings.length);
-                updateElement('upcomingFlights', confirmed);
-                updateElement('completedTrips', completed);
-                updateElement('totalSpent', `$${totalSpent.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-            }
-        }
-    } catch (error) {
-        console.error('Error loading dashboard data:', error);
+    const page = getNormalizedPage();
+    if (page === 'admin-dashboard.html' || (typeof isAdminRoute === 'function' && isAdminRoute(page))) {
+        return loadAdminDashboard();
     }
+    return loadUserDashboardData();
 }
 
 function updateElement(id, value) {
@@ -2336,7 +2334,7 @@ async function loadUserDashboardData() {
                 if (isFuture && status !== 'cancelled' && status !== 'expired') {
                     upcomingCount++;
                 }
-                if (status === 'boarded' || status === 'completed') {
+                if (status === 'boarded' || status === 'completed' || (!isFuture && (status === 'confirmed' || status === 'checked_in'))) {
                     completedCount++;
                 }
                 if (payment === 'paid' && status !== 'cancelled') {

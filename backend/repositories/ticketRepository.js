@@ -84,6 +84,26 @@ class TicketRepository {
   }
 
   /**
+   * Batch find all tickets by an array of booking IDs in a single query
+   */
+  async findByBookingIds(connection, bookingIds) {
+    if (!bookingIds || !Array.isArray(bookingIds) || bookingIds.length === 0) return [];
+    const placeholders = bookingIds.map(() => '?').join(',');
+    const [rows] = await connection.query(
+      `SELECT t.*, 
+              p.first_name as passenger_first_name, p.last_name as passenger_last_name, p.passport_number,
+              b.booking_reference, f.flight_number
+       FROM tickets t
+       INNER JOIN passengers p ON t.passenger_id = p.passenger_id
+       INNER JOIN bookings b ON t.booking_id = b.booking_id
+       INNER JOIN flights f ON t.flight_id = f.flight_id
+       WHERE t.booking_id IN (${placeholders})`,
+      bookingIds
+    );
+    return rows;
+  }
+
+  /**
    * Find ticket by booking_id and passenger_id (to prevent duplicate issuance)
    */
   async findByBookingIdAndPassengerId(connection, bookingId, passengerId) {

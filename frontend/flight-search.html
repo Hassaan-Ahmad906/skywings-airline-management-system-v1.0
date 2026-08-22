@@ -20,14 +20,36 @@
                 </a>
             </div>
             <ul class="nav-menu" id="navMenu">
-                <li><a href="user-dashboard.html">Dashboard</a></li>
-                <li><a href="flight-search.html" class="active">Book Flight</a></li>
-                <li><a href="my-bookings.html">My Bookings</a></li>
-                <li><a href="check-in.html">Check-in</a></li>
-                <li><a href="user-about-contact.html">About & Contact</a></li>
-                <li><a href="user-profile.html">Profile</a></li>
-                <li id="authNavItem"><a href="index.html" onclick="handleLogout()">Logout</a></li>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="flight-search.html" class="active">Flights</a></li>
+                <li><a href="about-contact.html">About & Contact</a></li>
+                <li><a href="login.html" class="btn-login">Login</a></li>
+                <li><a href="register.html" class="btn-register">Sign Up</a></li>
             </ul>
+            <script>
+                (function() {
+                    try {
+                        var role = localStorage.getItem('skywings_auth_role');
+                        var nav = document.getElementById('navMenu');
+                        if (nav) {
+                            if (role === 'user') {
+                                nav.innerHTML = '<li><a href="user-dashboard.html">Dashboard</a></li>' +
+                                                '<li><a href="flight-search.html" class="active">Book Flight</a></li>' +
+                                                '<li><a href="my-bookings.html">My Bookings</a></li>' +
+                                                '<li><a href="check-in.html">Check-in</a></li>' +
+                                                '<li><a href="user-about-contact.html">About & Contact</a></li>' +
+                                                '<li><a href="user-profile.html">Profile</a></li>' +
+                                                '<li id="authNavItem"><a href="index.html" onclick="handleLogout(); return false;">Logout</a></li>';
+                            } else if (role === 'admin') {
+                                nav.innerHTML = '<li><a href="admin-dashboard.html">Dashboard</a></li>' +
+                                                '<li><a href="admin-management.html">Management</a></li>' +
+                                                '<li><a href="admin-reports.html">Reports</a></li>' +
+                                                '<li id="authNavItem"><a href="index.html" onclick="handleLogout(); return false;">Logout</a></li>';
+                            }
+                        }
+                    } catch (e) {}
+                })();
+            </script>
             <div class="hamburger">
                 <span></span>
                 <span></span>
