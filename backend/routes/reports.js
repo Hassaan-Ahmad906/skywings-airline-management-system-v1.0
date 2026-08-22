@@ -97,14 +97,14 @@ router.get('/overview', async (req, res) => {
     const totalRevenue = await queryOne(
       `SELECT COALESCE(SUM(total_amount), 0) as total 
        FROM bookings 
-       WHERE LOWER(status) = 'confirmed' AND payment_status = 'paid'`
+       WHERE LOWER(status) IN ('confirmed', 'checked_in', 'boarded', 'completed') AND payment_status = 'paid'`
     );
 
     // Monthly revenue (current month)
     const monthlyRevenue = await queryOne(
       `SELECT COALESCE(SUM(total_amount), 0) as total 
        FROM bookings 
-       WHERE LOWER(status) = 'confirmed'
+       WHERE LOWER(status) IN ('confirmed', 'checked_in', 'boarded', 'completed')
          AND payment_status = 'paid'
          AND MONTH(booking_date) = MONTH(CURRENT_DATE)
          AND YEAR(booking_date) = YEAR(CURRENT_DATE)`
@@ -133,7 +133,7 @@ router.get('/overview', async (req, res) => {
        INNER JOIN flights f ON b.flight_id = f.flight_id
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
        INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
-       WHERE LOWER(b.status) = 'confirmed' AND b.payment_status = 'paid'
+       WHERE LOWER(b.status) IN ('confirmed', 'checked_in', 'boarded', 'completed') AND b.payment_status = 'paid'
        GROUP BY dep.city, arr.city
        ORDER BY booking_count DESC
        LIMIT 5`
@@ -212,14 +212,14 @@ router.get('/revenue', async (req, res) => {
     const totalRevenue = await queryOne(
       `SELECT COALESCE(SUM(total_amount), 0) as total 
        FROM bookings 
-       WHERE LOWER(status) = 'confirmed' AND payment_status = 'paid'`
+       WHERE LOWER(status) IN ('confirmed', 'checked_in', 'boarded', 'completed') AND payment_status = 'paid'`
     );
 
     // Monthly revenue
     const monthlyRevenue = await queryOne(
       `SELECT COALESCE(SUM(total_amount), 0) as total 
        FROM bookings 
-       WHERE LOWER(status) = 'confirmed' 
+       WHERE LOWER(status) IN ('confirmed', 'checked_in', 'boarded', 'completed') 
          AND payment_status = 'paid'
          AND MONTH(booking_date) = MONTH(CURRENT_DATE)
          AND YEAR(booking_date) = YEAR(CURRENT_DATE)`
@@ -234,7 +234,7 @@ router.get('/revenue', async (req, res) => {
        INNER JOIN flights f ON b.flight_id = f.flight_id
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
        INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
-       WHERE LOWER(b.status) = 'confirmed' AND b.payment_status = 'paid'
+       WHERE LOWER(b.status) IN ('confirmed', 'checked_in', 'boarded', 'completed') AND b.payment_status = 'paid'
        GROUP BY dep.city, arr.city
        ORDER BY revenue DESC
        LIMIT 5`
@@ -246,7 +246,7 @@ router.get('/revenue', async (req, res) => {
         DATE_FORMAT(booking_date, '%Y-%m') as month,
         COALESCE(SUM(total_amount), 0) as revenue
        FROM bookings
-       WHERE LOWER(status) = 'confirmed' 
+       WHERE LOWER(status) IN ('confirmed', 'checked_in', 'boarded', 'completed') 
          AND payment_status = 'paid'
        GROUP BY DATE_FORMAT(booking_date, '%Y-%m')
        ORDER BY month ASC`
@@ -256,7 +256,7 @@ router.get('/revenue', async (req, res) => {
     const lastMonthRevenue = await queryOne(
       `SELECT COALESCE(SUM(total_amount), 0) as total 
        FROM bookings 
-       WHERE LOWER(status) = 'confirmed' 
+       WHERE LOWER(status) IN ('confirmed', 'checked_in', 'boarded', 'completed') 
          AND payment_status = 'paid'
          AND MONTH(booking_date) = MONTH(DATE_SUB(CURRENT_DATE, INTERVAL 1 MONTH))
          AND YEAR(booking_date) = YEAR(DATE_SUB(CURRENT_DATE, INTERVAL 1 MONTH))`
@@ -346,9 +346,9 @@ router.get('/bookings', async (req, res) => {
         f.departure_datetime,
         f.status as flight_status,
         COUNT(b.booking_id) as total_bookings,
-        SUM(CASE WHEN LOWER(b.status) = 'confirmed' THEN 1 ELSE 0 END) as confirmed_bookings,
+        SUM(CASE WHEN LOWER(b.status) IN ('confirmed', 'checked_in', 'boarded', 'completed') THEN 1 ELSE 0 END) as confirmed_bookings,
         SUM(CASE WHEN LOWER(b.status) = 'cancelled' THEN 1 ELSE 0 END) as cancelled_bookings,
-        COALESCE(SUM(CASE WHEN LOWER(b.status) = 'confirmed' AND b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) as total_revenue
+        COALESCE(SUM(CASE WHEN LOWER(b.status) IN ('confirmed', 'checked_in', 'boarded', 'completed') AND b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) as total_revenue
        FROM flights f
        LEFT JOIN bookings b ON f.flight_id = b.flight_id
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
@@ -393,7 +393,7 @@ router.get('/routes', async (req, res) => {
        INNER JOIN flights f ON b.flight_id = f.flight_id
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
        INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
-       WHERE b.status = 'confirmed'
+       WHERE LOWER(b.status) IN ('confirmed', 'checked_in', 'boarded', 'completed')
        GROUP BY dep.city, arr.city, dep.airport_code, arr.airport_code
        ORDER BY booking_count DESC
        LIMIT 10`
