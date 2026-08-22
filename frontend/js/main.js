@@ -5,8 +5,14 @@ if (typeof window !== 'undefined' && 'scrollRestoration' in history) {
 }
 
 // ========== API CONFIGURATION ==========
-const API_BASE_URL = window.location.origin.includes('localhost') 
-    ? 'http://localhost:3000/api' 
+const API_BASE_URL = (typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1' || 
+    window.location.hostname === '::1' ||
+    window.location.origin.includes('localhost') ||
+    window.location.origin.includes('127.0.0.1')
+))
+    ? (window.location.port === '3000' ? '/api' : `http://${window.location.hostname || 'localhost'}:3000/api`) 
     : '/api';
 
 // Helper function to get auth token
@@ -435,7 +441,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     // User dashboard page - immediately fetch and populate metrics & bookings
-    if (page === 'user-dashboard.html') {
+    if (page === 'user-dashboard.html' || page === 'user-dashboard' || window.location.pathname.includes('user-dashboard')) {
         loadUserDashboardData();
     }
 
@@ -2313,145 +2319,160 @@ function updateElement(id, value) {
 }
 
 async function loadUserDashboardData() {
+    // Populate user greeting name immediately if available
+    const userNameEl = document.getElementById('userName');
+    if (userNameEl) {
+        const displayName = authState.userName || (authState.user && (authState.user.first_name || authState.user.name)) || '';
+        if (displayName) {
+            userNameEl.textContent = displayName;
+        }
+    }
+
     try {
         const bookingsResponse = await apiRequest('/bookings/list');
-        if (bookingsResponse.success && bookingsResponse.data && bookingsResponse.data.bookings) {
-            const allBookings = bookingsResponse.data.bookings || [];
-            const now = new Date();
-            
-            // Calculate User Dashboard Stats Dynamically
-            let totalBookingsCount = allBookings.length;
-            let upcomingCount = 0;
-            let completedCount = 0;
-            let totalSpentSum = 0;
+        const allBookings = (bookingsResponse && bookingsResponse.data && Array.isArray(bookingsResponse.data.bookings))
+            ? bookingsResponse.data.bookings
+            : (bookingsResponse && Array.isArray(bookingsResponse.data))
+                ? bookingsResponse.data
+                : (bookingsResponse && Array.isArray(bookingsResponse.bookings))
+                    ? bookingsResponse.bookings
+                    : [];
 
-            allBookings.forEach(b => {
-                const dep = new Date(b.departure_datetime || b.booking_date);
-                const isFuture = !isNaN(dep) && dep >= now;
-                const status = (b.status || 'pending').toLowerCase();
-                const payment = (b.payment_status || 'pending').toLowerCase();
+        const now = new Date();
+        
+        // Calculate User Dashboard Stats Dynamically
+        let totalBookingsCount = allBookings.length;
+        let upcomingCount = 0;
+        let completedCount = 0;
+        let totalSpentSum = 0;
 
-                if (isFuture && status !== 'cancelled' && status !== 'expired') {
-                    upcomingCount++;
-                }
-                if (status === 'boarded' || status === 'completed' || (!isFuture && (status === 'confirmed' || status === 'checked_in'))) {
-                    completedCount++;
-                }
-                if (payment === 'paid' && status !== 'cancelled') {
-                    totalSpentSum += parseFloat(b.total_amount || 0);
-                }
-            });
+        allBookings.forEach(b => {
+            const dep = new Date(b.departure_datetime || b.booking_date);
+            const isFuture = !isNaN(dep) && dep >= now;
+            const status = (b.status || 'pending').toLowerCase();
+            const payment = (b.payment_status || 'pending').toLowerCase();
 
-            // Update stats elements if present
-            const elTotalBookings = document.getElementById('totalBookings');
-            const elUpcomingFlights = document.getElementById('upcomingFlights');
-            const elCompletedTrips = document.getElementById('completedTrips');
-            const elTotalSpent = document.getElementById('totalSpent');
-
-            if (elTotalBookings) elTotalBookings.textContent = totalBookingsCount;
-            if (elUpcomingFlights) elUpcomingFlights.textContent = upcomingCount;
-            if (elCompletedTrips) elCompletedTrips.textContent = completedCount;
-            if (elTotalSpent) elTotalSpent.textContent = totalSpentSum.toFixed(2);
-            
-            // Sort by departure date (upcoming first)
-            const sortedBookings = [...allBookings].sort((a, b) => {
-                const dateA = new Date(a.departure_datetime || a.booking_date);
-                const dateB = new Date(b.departure_datetime || b.booking_date);
-                return dateA - dateB;
-            });
-            
-            // Filter upcoming flights (future departure and active status)
-            const upcomingFlights = sortedBookings
-                .filter(b => {
-                    const depDate = new Date(b.departure_datetime || b.booking_date);
-                    const status = (b.status || '').toLowerCase();
-                    return depDate >= now && status !== 'cancelled' && status !== 'expired';
-                })
-                .slice(0, 3);
-            
-            const upcomingList = document.getElementById('upcomingFlightsList');
-            if (upcomingList) {
-                if (upcomingFlights.length === 0) {
-                    upcomingList.innerHTML = '<div class="empty-state"><p>No upcoming flights. <a href="flight-search.html">Book a flight now!</a></p></div>';
-                } else {
-                    upcomingList.innerHTML = upcomingFlights.map(booking => {
-                        const dep = new Date(booking.departure_datetime || booking.booking_date);
-                        const status = (booking.status || 'pending').toLowerCase();
-                        let badgeLabel = status.toUpperCase();
-                        if (status === 'checked_in') badgeLabel = '✅ CHECKED IN';
-                        else if (status === 'pending') badgeLabel = '⏳ PENDING';
-                        else if (status === 'confirmed') badgeLabel = 'CONFIRMED';
-
-                        return `
-                            <div class="flight-card" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; margin-bottom: 12px;">
-                                <div class="flight-info">
-                                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
-                                        <h3 style="margin: 0; color: #38bdf8; font-size: 1.1rem;">${booking.flight_number || 'N/A'}</h3>
-                                        <span class="status-badge status-${status}" style="font-size: 0.75rem; padding: 2px 8px;">${badgeLabel}</span>
-                                    </div>
-                                    <p style="margin: 0 0 4px 0; font-weight: 600; color: #f8fafc;">${booking.from_city || booking.from_name || 'N/A'} (${booking.from_code || ''}) → ${booking.to_city || booking.to_name || 'N/A'} (${booking.to_code || ''})</p>
-                                    <p style="margin: 0; color: #94a3b8; font-size: 0.85rem;">📅 ${dep.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at ${dep.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
-                                </div>
-                                <div class="flight-actions" style="display: flex; gap: 8px; align-items: center;">
-                                    ${status === 'pending' ? `<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : ''}
-                                    ${status === 'confirmed' ? `<button class="btn btn-sm btn-secondary" onclick="checkIn(${booking.booking_id})">Check-in</button>` : ''}
-                                    <button class="btn btn-sm btn-primary" onclick="viewBookingDetails(${booking.booking_id})">View Details</button>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                }
+            if (isFuture && status !== 'cancelled' && status !== 'expired') {
+                upcomingCount++;
             }
-            
-            // Load recent bookings (sorted by booking date, most recent first)
-            const recentBookings = [...allBookings]
-                .sort((a, b) => {
-                    const dateA = new Date(a.booking_date);
-                    const dateB = new Date(b.booking_date);
-                    return dateB - dateA;
-                })
-                .slice(0, 5);
-            
-            const recentTable = document.getElementById('recentBookingsTable');
-            if (recentTable) {
-                if (recentBookings.length === 0) {
-                    recentTable.innerHTML = '<tr><td colspan="5" class="empty-state">No recent bookings</td></tr>';
-                } else {
-                    recentTable.innerHTML = recentBookings.map(booking => {
-                        const date = new Date(booking.booking_date);
-                        const dep = new Date(booking.departure_datetime || booking.booking_date);
-                        const flightHasPassed = dep < now;
-                        
-                        let displayStatus = String(booking.status || 'pending').toLowerCase();
-                        if (flightHasPassed && (displayStatus === 'confirmed' || displayStatus === 'completed' || displayStatus === 'checked_in')) {
-                            const hasSeats = booking.passengers && booking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-                            displayStatus = hasSeats ? 'boarded' : 'missed';
-                        }
-                        
-                        const displayStatusText = String(displayStatus).toLowerCase();
-                        let badgeLabel = displayStatusText.toUpperCase();
-                        if (displayStatusText === 'boarded') badgeLabel = '✈️ BOARDED';
-                        else if (displayStatusText === 'missed') badgeLabel = '⚠️ MISSED';
-                        else if (displayStatusText === 'checked_in') badgeLabel = '✅ CHECKED IN';
-                        else if (displayStatusText === 'pending') badgeLabel = '⏳ PENDING';
-                        else if (displayStatusText === 'cancelled') badgeLabel = '🚫 CANCELLED';
-                        
-                        return `
-                            <tr>
-                                <td><strong style="color: #f8fafc;">${booking.booking_reference || 'N/A'}</strong></td>
-                                <td><strong style="color: #38bdf8;">${booking.flight_number || 'N/A'}</strong></td>
-                                <td>${date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</td>
-                                <td><span class="status-badge status-${displayStatusText}" style="display: inline-flex !important; align-items: center !important; justify-content: center !important; visibility: visible !important; opacity: 1 !important; min-width: 90px; text-align: center !important; line-height: 1 !important; margin: 0 auto !important;">${badgeLabel}</span></td>
-                                <td>
-                                    <div style="display: flex; gap: 6px; align-items: center;">
-                                        <button class="btn btn-sm btn-secondary" onclick="viewBookingDetails(${booking.booking_id})">View</button>
-                                        ${displayStatusText === 'pending' && !flightHasPassed ? `<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : ''}
-                                    </div>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
+            if (status === 'boarded' || status === 'completed' || (!isFuture && (status === 'confirmed' || status === 'checked_in'))) {
+                completedCount++;
+            }
+            if (payment === 'paid' && status !== 'cancelled') {
+                const numericAmount = parseFloat(String(b.total_amount || 0).replace(/[^0-9.-]+/g, '')) || 0;
+                totalSpentSum += numericAmount;
+            }
+        });
+
+        // Update stats elements if present
+        const elTotalBookings = document.getElementById('totalBookings');
+        const elUpcomingFlights = document.getElementById('upcomingFlights');
+        const elCompletedTrips = document.getElementById('completedTrips');
+        const elTotalSpent = document.getElementById('totalSpent');
+
+        if (elTotalBookings) elTotalBookings.textContent = totalBookingsCount;
+        if (elUpcomingFlights) elUpcomingFlights.textContent = upcomingCount;
+        if (elCompletedTrips) elCompletedTrips.textContent = completedCount;
+        if (elTotalSpent) elTotalSpent.textContent = totalSpentSum.toFixed(2);
+        
+        // Sort by departure date (upcoming first)
+        const sortedBookings = [...allBookings].sort((a, b) => {
+            const dateA = new Date(a.departure_datetime || a.booking_date);
+            const dateB = new Date(b.departure_datetime || b.booking_date);
+            return dateA - dateB;
+        });
+        
+        // Filter upcoming flights (future departure and active status)
+        const upcomingFlights = sortedBookings
+            .filter(b => {
+                const depDate = new Date(b.departure_datetime || b.booking_date);
+                const status = (b.status || '').toLowerCase();
+                return depDate >= now && status !== 'cancelled' && status !== 'expired';
+            })
+            .slice(0, 3);
+        
+        const upcomingList = document.getElementById('upcomingFlightsList');
+        if (upcomingList) {
+            if (upcomingFlights.length === 0) {
+                upcomingList.innerHTML = '<div class="empty-state"><p>No upcoming flights. <a href="flight-search.html">Book a flight now!</a></p></div>';
+            } else {
+                upcomingList.innerHTML = upcomingFlights.map(booking => {
+                    const dep = new Date(booking.departure_datetime || booking.booking_date);
+                    const status = (booking.status || 'pending').toLowerCase();
+                    let badgeLabel = status.toUpperCase();
+                    if (status === 'checked_in') badgeLabel = '✅ CHECKED IN';
+                    else if (status === 'pending') badgeLabel = '⏳ PENDING';
+                    else if (status === 'confirmed') badgeLabel = 'CONFIRMED';
+
+                    return `
+                        <div class="flight-card" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; margin-bottom: 12px;">
+                            <div class="flight-info">
+                                <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                                    <h3 style="margin: 0; color: #38bdf8; font-size: 1.1rem;">${booking.flight_number || 'N/A'}</h3>
+                                    <span class="status-badge status-${status}" style="font-size: 0.75rem; padding: 2px 8px;">${badgeLabel}</span>
+                                </div>
+                                <p style="margin: 0 0 4px 0; font-weight: 600; color: #f8fafc;">${booking.from_city || booking.from_name || 'N/A'} (${booking.from_code || ''}) → ${booking.to_city || booking.to_name || 'N/A'} (${booking.to_code || ''})</p>
+                                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem;">📅 ${dep.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at ${dep.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
+                            </div>
+                            <div class="flight-actions" style="display: flex; gap: 8px; align-items: center;">
+                                ${status === 'pending' ? `<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : ''}
+                                ${status === 'confirmed' ? `<button class="btn btn-sm btn-secondary" onclick="checkIn(${booking.booking_id})">Check-in</button>` : ''}
+                                <button class="btn btn-sm btn-primary" onclick="viewBookingDetails(${booking.booking_id})">View Details</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+        
+        // Load recent bookings (sorted by booking date, most recent first)
+        const recentBookings = [...allBookings]
+            .sort((a, b) => {
+                const dateA = new Date(a.booking_date);
+                const dateB = new Date(b.booking_date);
+                return dateB - dateA;
+            })
+            .slice(0, 5);
+        
+        const recentTable = document.getElementById('recentBookingsTable');
+        if (recentTable) {
+            if (recentBookings.length === 0) {
+                recentTable.innerHTML = '<tr><td colspan="5" class="empty-state">No recent bookings</td></tr>';
+            } else {
+                recentTable.innerHTML = recentBookings.map(booking => {
+                    const date = new Date(booking.booking_date);
+                    const dep = new Date(booking.departure_datetime || booking.booking_date);
+                    const flightHasPassed = dep < now;
+                    
+                    let displayStatus = String(booking.status || 'pending').toLowerCase();
+                    if (flightHasPassed && (displayStatus === 'confirmed' || displayStatus === 'completed' || displayStatus === 'checked_in')) {
+                        const hasSeats = booking.passengers && booking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
+                        displayStatus = hasSeats ? 'boarded' : 'missed';
+                    }
+                    
+                    const displayStatusText = String(displayStatus).toLowerCase();
+                    let badgeLabel = displayStatusText.toUpperCase();
+                    if (displayStatusText === 'boarded') badgeLabel = '✈️ BOARDED';
+                    else if (displayStatusText === 'missed') badgeLabel = '⚠️ MISSED';
+                    else if (displayStatusText === 'checked_in') badgeLabel = '✅ CHECKED IN';
+                    else if (displayStatusText === 'pending') badgeLabel = '⏳ PENDING';
+                    else if (displayStatusText === 'cancelled') badgeLabel = '🚫 CANCELLED';
+                    
+                    return `
+                        <tr>
+                            <td><strong style="color: #f8fafc;">${booking.booking_reference || 'N/A'}</strong></td>
+                            <td><strong style="color: #38bdf8;">${booking.flight_number || 'N/A'}</strong></td>
+                            <td>${date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</td>
+                            <td><span class="status-badge status-${displayStatusText}" style="display: inline-flex !important; align-items: center !important; justify-content: center !important; visibility: visible !important; opacity: 1 !important; min-width: 90px; text-align: center !important; line-height: 1 !important; margin: 0 auto !important;">${badgeLabel}</span></td>
+                            <td>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <button class="btn btn-sm btn-secondary" onclick="viewBookingDetails(${booking.booking_id})">View</button>
+                                    ${displayStatusText === 'pending' && !flightHasPassed ? `<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : ''}
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
             }
         }
     } catch (error) {
