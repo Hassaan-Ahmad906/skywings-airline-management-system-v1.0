@@ -977,18 +977,14 @@ async function handleRegister(event) {
         hasErrors = true;
     }
     
-    if (!phone) {
-        showFieldError(form, 'phone', 'Phone number is required');
-        hasErrors = true;
-    } else if (!isValidPhone(phone)) {
+    // Validate phone only if provided in form
+    if (phone && !isValidPhone(phone)) {
         showFieldError(form, 'phone', 'Please enter a valid phone number');
         hasErrors = true;
     }
     
-    if (!dob) {
-        showFieldError(form, 'dob', 'Date of birth is required');
-        hasErrors = true;
-    } else if (!isValidDateOfBirth(dob)) {
+    // Validate date of birth only if provided in form
+    if (dob && !isValidDateOfBirth(dob)) {
         showFieldError(form, 'dob', 'Please enter a valid date of birth (must be at least 18 years old and not in the future)');
         hasErrors = true;
     }
@@ -1018,7 +1014,8 @@ async function handleRegister(event) {
         hasErrors = true;
     }
     
-    if (!terms) {
+    // Validate terms only if terms checkbox exists in the form
+    if (form.querySelector('[name="terms"]') && !terms) {
         showFieldError(form, 'terms', 'You must agree to the Terms & Conditions');
         hasErrors = true;
     }
@@ -1057,7 +1054,7 @@ async function handleRegister(event) {
                 role: 'user'
             };
             setClientAuth(newUser);
-            window.location.href = 'user-dashboard.html';
+            window.location.replace('user-dashboard.html');
         } else {
             throw new Error(response.message || 'Registration failed');
         }
@@ -1071,7 +1068,7 @@ async function handleRegister(event) {
         }
         if (error.response && error.response.errors && error.response.errors.length > 0) {
             error.response.errors.forEach(err => {
-                showFieldError(form, err.param || 'general', err.msg || errorMessage);
+                showFieldError(form, err.param || err.path || 'general', err.msg || errorMessage);
             });
         } else {
             showFormError(form, errorMessage);
@@ -2298,16 +2295,16 @@ async function loadDashboardData() {
             const response = await apiRequest('/bookings/list');
             if (response.success && response.data) {
                 const bookings = response.data.bookings || [];
-                const confirmed = bookings.filter(b => b.status === 'confirmed').length;
-                const completed = bookings.filter(b => b.status === 'completed').length;
+                const confirmed = bookings.filter(b => ['confirmed', 'checked_in', 'boarded'].includes((b.status || '').toLowerCase())).length;
+                const completed = bookings.filter(b => (b.status || '').toLowerCase() === 'completed').length;
                 const totalSpent = bookings
-                    .filter(b => b.status === 'confirmed' || b.status === 'completed')
+                    .filter(b => ['confirmed', 'checked_in', 'boarded', 'completed'].includes((b.status || '').toLowerCase()))
                     .reduce((sum, b) => sum + parseFloat(b.total_amount || 0), 0);
                 
                 updateElement('totalBookings', bookings.length);
                 updateElement('upcomingFlights', confirmed);
                 updateElement('completedTrips', completed);
-                updateElement('totalSpent', `$${totalSpent.toLocaleString()}`);
+                updateElement('totalSpent', `$${totalSpent.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
             }
         }
     } catch (error) {
@@ -5913,7 +5910,8 @@ function renderBookingRowsHelper(bookings, tbodyElement) {
             }
             const group = flightMap.get(key);
             group.bookings.push(b);
-            if ((b.status || '').toLowerCase() === 'confirmed') {
+            const bStatus = (b.status || '').toLowerCase();
+            if (['confirmed', 'checked_in', 'boarded', 'completed'].includes(bStatus)) {
                 group.totalRevenue += parseFloat(b.total_amount || 0);
             }
         });
@@ -5937,7 +5935,7 @@ function renderBookingRowsHelper(bookings, tbodyElement) {
                         </div>
                         <div style="display: flex; align-items: center; gap: 12px;">
                             <span style="background: rgba(255, 255, 255, 0.08); color: #e2e8f0; font-size: 0.78rem; font-weight: 700; padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">👥 ${group.bookings.length} Booking${group.bookings.length === 1 ? '' : 's'}</span>
-                            <span style="background: rgba(16, 185, 129, 0.16); color: #34d399; font-size: 0.82rem; font-weight: 800; padding: 3px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.32);">💰 Confirmed: $${group.totalRevenue.toFixed(2)}</span>
+                            <span style="background: rgba(16, 185, 129, 0.16); color: #34d399; font-size: 0.82rem; font-weight: 800; padding: 3px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.32);">💰 Revenue: $${group.totalRevenue.toFixed(2)}</span>
                         </div>
                     </div>
                 </td>
