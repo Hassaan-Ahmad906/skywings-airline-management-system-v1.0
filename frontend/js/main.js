@@ -1,21 +1,4 @@
 
-// ========== PRE-RENDER INSTANT REDIRECT CHECK ==========
-(function() {
-    const rawPath = (window.location.pathname || '').toLowerCase();
-    const cleanPath = rawPath.split('?')[0].split('#')[0];
-    const page = cleanPath.split('/').filter(Boolean).pop() || 'index.html';
-    if (page === 'index.html' || page === 'login.html' || page === 'register.html') {
-        try {
-            const cachedRole = localStorage.getItem('skywings_auth_role');
-            if (cachedRole === 'admin') {
-                window.location.replace('admin-dashboard.html');
-            } else if (cachedRole === 'user') {
-                window.location.replace('user-dashboard.html');
-            }
-        } catch (e) {}
-    }
-})();
-
 // ========== SCROLL RESTORATION & INITIALIZATION ==========
 if (typeof window !== 'undefined' && 'scrollRestoration' in history) {
     history.scrollRestoration = 'manual';
@@ -429,6 +412,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
     
+    // If guest accesses user-about-contact.html, smoothly route to public about-contact.html
+    if (page === 'user-about-contact.html' && !authState.isLoggedIn) {
+        window.location.replace('about-contact.html');
+        return;
+    }
+
     // User pages - require user authentication
     if (isUserProtectedRoute(page)) {
         if (!requireAuth('user')) {
