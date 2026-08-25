@@ -18,7 +18,9 @@ class FlightRepository {
         END as price
        FROM flights f
        INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
-       WHERE f.flight_id = ? AND LOWER(f.status) IN ('scheduled', 'boarding', 'in_air', 'active')
+       WHERE f.flight_id = ?
+         AND LOWER(f.status) IN ('scheduled', 'boarding', 'in_air', 'active')
+         AND f.departure_datetime > CURRENT_TIMESTAMP
        FOR UPDATE`,
       [flightClass, flightClass, flightClass, flightId]
     );

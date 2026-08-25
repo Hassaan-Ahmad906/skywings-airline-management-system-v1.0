@@ -382,9 +382,7 @@ function isBackForwardNavigation(event) {
 window.addEventListener('pageshow', function(event) {
     if (isBackForwardNavigation(event)) {
         window.location.reload();
-        return;
     }
-    handlePageRestore();
 });
 
 window.addEventListener('popstate', function() {
@@ -2491,17 +2489,26 @@ async function loadUserDashboardData() {
 // Chart instances
 let revenueChart = null;
 let bookingChart = null;
+let adminDashboardLoadPromise = null;
 
 async function loadAdminDashboard() {
-    try {
-        await Promise.all([
+    if (adminDashboardLoadPromise) {
+        return adminDashboardLoadPromise;
+    }
+
+    adminDashboardLoadPromise = Promise.all([
             loadAdminStats(),
             loadDashboardRecentBookings(),
             loadReportCharts()
-        ]);
-    } catch (error) {
-        console.error('Error loading admin dashboard:', error);
-    }
+        ])
+        .catch(error => {
+            console.error('Error loading admin dashboard:', error);
+        })
+        .finally(() => {
+            adminDashboardLoadPromise = null;
+        });
+
+    return adminDashboardLoadPromise;
 }
 
 async function loadAdminStats() {

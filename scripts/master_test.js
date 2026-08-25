@@ -49,6 +49,13 @@ function makeHttpRequest(path, method = 'GET', body = null, cookie = null) {
   });
 }
 
+function toMysqlDateTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid datetime supplied for cleanup: ${value}`);
+  const pad = (number) => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 async function runMaster1000Audit() {
   console.log('\n======================================================================');
   console.log('🚀 MASTER ENTERPRISE 1,000-POINT SYSTEM INTEGRATION & STABILITY AUDIT');
@@ -56,6 +63,11 @@ async function runMaster1000Audit() {
 
   let adminCookie = null;
   let userCookie = null;
+  let auditBookingId = null;
+  let auditFlightId = null;
+  let originalFlightSchedule = null;
+  let temporaryAirportCreated = false;
+  const tempAirportCode = 'TST';
 
   try {
     // ==========================================
@@ -162,7 +174,6 @@ async function runMaster1000Audit() {
     assert(airportList.length >= 6, `Airports registry populated with ${airportList.length} airports`);
 
     // Add Temporary Airport
-    const tempAirportCode = 'TST';
     await pool.query('DELETE FROM airports WHERE airport_code = ?', [tempAirportCode]);
     const addAirportRes = await makeHttpRequest('/api/admin/airports', 'POST', {
       airport_code: tempAirportCode,
@@ -171,6 +182,7 @@ async function runMaster1000Audit() {
       country: 'Test Country'
     }, adminCookie);
     assert(addAirportRes.statusCode === 201 && addAirportRes.data.success, 'New airport created successfully via Admin API');
+    temporaryAirportCreated = true;
 
     // Prevent duplicate airport addition
     const dupAirportRes = await makeHttpRequest('/api/admin/airports', 'POST', {
@@ -258,6 +270,8 @@ async function runMaster1000Audit() {
     assert(bookingRes.statusCode === 201 && bookingRes.data.success, 'New booking created successfully');
     const createdBooking = bookingRes.data.data.booking;
     const bookingId = createdBooking.booking_id;
+    auditBookingId = bookingId;
+    auditFlightId = testFlight.flight_id;
     assert(!!createdBooking.booking_reference, `Booking generated unique PNR: ${createdBooking.booking_reference}`);
     assert(createdBooking.status === 'CONFIRMED', 'Paid booking initialized with CONFIRMED status');
 
@@ -273,6 +287,10 @@ async function runMaster1000Audit() {
     console.log('\n--- SECTION 7: Online Check-in, Boarding Pass & State Machine ---');
     
     // Set departure to 6 hours from now and arrival to 14 hours from now so check-in window is open (< 24h)
+    originalFlightSchedule = {
+      departure: testFlight.departure_datetime,
+      arrival: testFlight.arrival_datetime
+    };
     await pool.query('UPDATE flights SET departure_datetime = DATE_ADD(NOW(), INTERVAL 6 HOUR), arrival_datetime = DATE_ADD(NOW(), INTERVAL 14 HOUR) WHERE flight_id = ?', [testFlight.flight_id]);
 
     // Search Check-in
@@ -315,16 +333,6 @@ async function runMaster1000Audit() {
     assert(auditLogs.length > 0, `Centralized audit log records captured (${auditLogs.length} recent audit logs)`);
     assert(!JSON.stringify(auditLogs).includes('admin123') && !JSON.stringify(auditLogs).includes('password'), 'Security: Sensitive credentials sanitized in audit logs');
 
-    // Clean up test booking and tickets
-    await pool.query('DELETE FROM check_ins WHERE booking_id = ?', [bookingId]);
-    await pool.query('DELETE FROM flight_seat_allocations WHERE booking_id = ?', [bookingId]);
-    await pool.query('DELETE FROM ticket_audit_logs WHERE ticket_id IN (SELECT ticket_id FROM tickets WHERE booking_id = ?)', [bookingId]);
-    await pool.query('DELETE FROM tickets WHERE booking_id = ?', [bookingId]);
-    await pool.query('DELETE FROM booking_passengers WHERE booking_id = ?', [bookingId]);
-    await pool.query('DELETE FROM bookings WHERE booking_id = ?', [bookingId]);
-    await pool.query('DELETE FROM airports WHERE airport_code = ?', [tempAirportCode]);
-    await pool.query('UPDATE flights SET departure_datetime = ?, arrival_datetime = ? WHERE flight_id = ?', [new Date(testFlight.departure_datetime), new Date(testFlight.arrival_datetime), testFlight.flight_id]);
-
     // ==========================================
     // SECTION 9: FRONTEND ASSETS & MASTER INVARIANT EXPANSION
     // ==========================================
@@ -366,8 +374,32 @@ async function runMaster1000Audit() {
 
   } catch (error) {
     console.error('\n❌ MASTER AUDIT FAILED:', error);
-    process.exit(1);
+    // Allow the finally block to complete asynchronous database cleanup.
+    process.exitCode = 1;
   } finally {
+    // Always remove test data, including when an assertion above fails.
+    try {
+      if (auditBookingId) {
+        await pool.query('DELETE FROM check_ins WHERE booking_id = ?', [auditBookingId]);
+        await pool.query('DELETE FROM flight_seat_allocations WHERE booking_id = ?', [auditBookingId]);
+        await pool.query('DELETE FROM ticket_audit_logs WHERE ticket_id IN (SELECT ticket_id FROM tickets WHERE booking_id = ?)', [auditBookingId]);
+        await pool.query('DELETE FROM tickets WHERE booking_id = ?', [auditBookingId]);
+        await pool.query('DELETE FROM booking_passengers WHERE booking_id = ?', [auditBookingId]);
+        await pool.query('DELETE FROM bookings WHERE booking_id = ?', [auditBookingId]);
+      }
+      if (originalFlightSchedule && auditFlightId) {
+        await pool.query('UPDATE flights SET departure_datetime = ?, arrival_datetime = ? WHERE flight_id = ?', [
+          toMysqlDateTime(originalFlightSchedule.departure),
+          toMysqlDateTime(originalFlightSchedule.arrival),
+          auditFlightId
+        ]);
+      }
+      if (temporaryAirportCreated) {
+        await pool.query('DELETE FROM airports WHERE airport_code = ?', [tempAirportCode]);
+      }
+    } catch (cleanupError) {
+      console.error('Master audit cleanup failed:', cleanupError.message);
+    }
     await pool.end();
   }
 }
