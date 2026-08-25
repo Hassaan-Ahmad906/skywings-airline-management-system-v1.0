@@ -2252,37 +2252,65 @@ textarea::placeholder {
     visibility: visible;
     opacity: 1;
 }
-
-/* Pagination controls styling */
+/* Pagination controls base styling */
 .pagination-controls {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    gap: 8px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-radius: 12px;
+    padding: 4px 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
-.pagination-controls button {
-    padding: 0.5rem 1rem;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: white;
+.pagination-controls button,
+.pagination-controls .btn-sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+    border: 1px solid rgba(56, 189, 248, 0.28);
+    color: #f8fafc;
     border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    white-space: nowrap;
+    user-select: none;
 }
 
-.pagination-controls button:hover {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
+.pagination-controls button:not(:disabled):hover,
+.pagination-controls .btn-sm:not(:disabled):hover {
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(56, 189, 248, 0.18));
+    border-color: #38bdf8;
+    color: #38bdf8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35), inset 0 0 10px rgba(56, 189, 248, 0.15);
 }
 
-.pagination-controls button:disabled {
-    opacity: 0.5;
+.pagination-controls button:not(:disabled):active,
+.pagination-controls .btn-sm:not(:disabled):active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.pagination-controls button:disabled,
+.pagination-controls .btn-sm:disabled {
+    opacity: 0.32;
     cursor: not-allowed;
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #64748b;
+    box-shadow: none;
+    pointer-events: none;
 }
 
 .admin-table td .btn-icon {
@@ -7295,47 +7323,73 @@ textarea::placeholder {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    background: rgba(15, 23, 42, 0.75);
-    padding: 4px 12px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.75));
+    padding: 4px 10px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     min-height: 38px;
 }
 
 .pagination-controls span {
     color: #94a3b8;
-    font-size: 0.84rem;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.pagination-controls .btn-sm {
-    padding: 4px 12px;
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     font-weight: 600;
-    border-radius: 8px;
-    background: rgba(30, 41, 59, 0.85);
-    color: #e2e8f0;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    cursor: pointer;
-    transition: all 0.2s ease;
     white-space: nowrap;
+    padding: 3px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    letter-spacing: 0.01em;
 }
 
+.pagination-controls button,
+.pagination-controls .btn-sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 13px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+    color: #f8fafc;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    cursor: pointer;
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    user-select: none;
+}
+
+.pagination-controls button:not(:disabled):hover,
 .pagination-controls .btn-sm:not(:disabled):hover {
-    background: rgba(56, 189, 248, 0.2);
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.3), rgba(56, 189, 248, 0.2));
     border-color: #38bdf8;
     color: #38bdf8;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(56, 189, 248, 0.4), inset 0 0 8px rgba(56, 189, 248, 0.2);
 }
 
+.pagination-controls button:not(:disabled):active,
+.pagination-controls .btn-sm:not(:disabled):active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.pagination-controls button:disabled,
 .pagination-controls .btn-sm:disabled {
     opacity: 0.35;
     cursor: not-allowed;
+    background: rgba(15, 23, 42, 0.4);
     border-color: rgba(255, 255, 255, 0.06);
+    color: #64748b;
+    box-shadow: none;
+    pointer-events: none;
 }
 
 /* Universal Admin Table Container with Stable Min-Height & Horizontal Scroll Protection */

@@ -151,21 +151,26 @@ router.get('/flights', async (req, res) => {
     if (search) {
       searchCondition = `AND (
         f.flight_number LIKE ? OR
+        f.from_airport_code LIKE ? OR
+        f.to_airport_code LIKE ? OR
         dep.city LIKE ? OR
         dep.airport_name LIKE ? OR
         arr.city LIKE ? OR
-        arr.airport_name LIKE ?
+        arr.airport_name LIKE ? OR
+        a.model LIKE ? OR
+        f.status LIKE ?
       )`;
       const searchPattern = `%${search}%`;
-      params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+      params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
     // Get total count for pagination
     const countResults = await query(
       `SELECT COUNT(*) as total 
        FROM flights f
-       INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
-       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
+       LEFT JOIN aircraft a ON f.aircraft_id = a.aircraft_id
+       LEFT JOIN airports dep ON f.from_airport_code = dep.airport_code
+       LEFT JOIN airports arr ON f.to_airport_code = arr.airport_code
        WHERE 1=1 ${searchCondition}`,
       params
     );
@@ -193,18 +198,18 @@ router.get('/flights', async (req, res) => {
         f.first_class_price,
         f.created_at,
         f.updated_at,
-        a.model as aircraft_model,
-        a.capacity,
-        dep.airport_name as from_name,
-        dep.city as from_city,
-        dep.country as from_country,
-        arr.airport_name as to_name,
-        arr.city as to_city,
-        arr.country as to_country
+        COALESCE(a.model, 'Standard Jet') as aircraft_model,
+        COALESCE(a.capacity, 180) as capacity,
+        COALESCE(dep.airport_name, f.from_airport_code) as from_name,
+        COALESCE(dep.city, f.from_airport_code) as from_city,
+        COALESCE(dep.country, '') as from_country,
+        COALESCE(arr.airport_name, f.to_airport_code) as to_name,
+        COALESCE(arr.city, f.to_airport_code) as to_city,
+        COALESCE(arr.country, '') as to_country
        FROM flights f
-       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
-       INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
-       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
+       LEFT JOIN aircraft a ON f.aircraft_id = a.aircraft_id
+       LEFT JOIN airports dep ON f.from_airport_code = dep.airport_code
+       LEFT JOIN airports arr ON f.to_airport_code = arr.airport_code
        WHERE 1=1 ${searchCondition}
        ORDER BY f.departure_datetime DESC
        LIMIT ${safeLimit} OFFSET ${safeOffset}`,
