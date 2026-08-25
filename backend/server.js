@@ -12,12 +12,27 @@ const db = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const localOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
-const configuredOrigins = (process.env.FRONTEND_URL || '')
+// FRONTEND_URL may contain one origin or a comma-separated list of deployed
+// frontend origins.  Keep this an explicit allow-list: cookies are enabled,
+// so reflecting every Origin would be unsafe.
+const configuredOrigins = [process.env.FRONTEND_URL, process.env.CORS_ALLOWED_ORIGINS]
+  .filter(Boolean)
+  .join(',')
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
-const allowedOrigins = new Set([...localOrigins, ...configuredOrigins]);
+const allowedOrigins = new Set(configuredOrigins);
+
+function isLocalDevelopmentOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' ||
+        url.hostname === '::1' || url.hostname === '[::1]');
+  } catch {
+    return false;
+  }
+}
 
 const auditMiddleware = require('./middleware/auditMiddleware');
 
@@ -38,7 +53,9 @@ app.use(auditMiddleware);
 app.use(cors({
   origin(origin, callback) {
     // Requests without an Origin header include same-origin navigation and health checks.
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    if (!origin || isLocalDevelopmentOrigin(origin) || allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
     const error = new Error('CORS origin is not allowed');
     error.status = 403;
     return callback(error);

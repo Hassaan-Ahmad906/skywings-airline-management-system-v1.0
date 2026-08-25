@@ -119,6 +119,7 @@ git push -u origin main
    | `DB_SSL` | `true` | Enables TLS 1.2 required by TiDB |
    | `JWT_SECRET` | `skywings_super_secure_enterprise_key_2026` | Any strong secret |
    | `JWT_EXPIRES_IN` | `7d` | Token validity |
+   | `FRONTEND_URL` | `https://your-app.vercel.app` | Exact Vercel production URL; required for browser login/registration |
 
 5. **Deploy**:
    - Click **Create Web Service**.
@@ -165,7 +166,7 @@ git push -u origin main
 
 4. **Deploy**:
    - Click **Deploy**.
-   - Vercel will deploy your frontend to a global edge CDN (e.g. `https://skywings-airlines.vercel.app`).
+   - Vercel will deploy your frontend to a global edge CDN (e.g. `https://skywings-airlines.vercel.app`). Copy that exact URL into the Render service's `FRONTEND_URL` environment variable, then redeploy the Render service. If you also use a custom domain, add it to `CORS_ALLOWED_ORIGINS` as a comma-separated origin.
 
 ---
 
