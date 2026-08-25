@@ -4,16 +4,22 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 require('dotenv').config();
 
+if (process.env.NODE_ENV === 'production' && (!process.env.DB_PASSWORD || !process.env.DB_USER || !process.env.DB_HOST)) {
+  throw new Error('DB_HOST, DB_USER, and DB_PASSWORD must be configured in production.');
+}
+
 // Database configuration for MySQL / TiDB Cloud Serverless
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT, 10) || 3306,
   user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '2240',
+  password: process.env.DB_PASSWORD || '2240', // Local development only; production is validated above.
   database: process.env.DB_NAME || 'skywings_airlines',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 10,
   queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
   charset: 'utf8mb4',
   multipleStatements: false,
   dateStrings: false,

@@ -1,7 +1,14 @@
 const jwt = require('jsonwebtoken');
 const { queryOne } = require('../config/database');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'skywings-secret-key-change-in-production';
+const isProduction = process.env.NODE_ENV === 'production';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (isProduction && (!JWT_SECRET || JWT_SECRET.length < 32)) {
+  throw new Error('JWT_SECRET must be set to a random value of at least 32 characters in production.');
+}
+
+const signingSecret = JWT_SECRET || 'development-only-secret-do-not-use-in-production';
 
 // Middleware to verify JWT token
 async function authenticate(req, res, next) {
@@ -24,7 +31,7 @@ async function authenticate(req, res, next) {
     }
     
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, signingSecret);
       
       // Get user from database to ensure they still exist and are active
       const user = await queryOne(
@@ -75,14 +82,15 @@ function requireAdmin(req, res, next) {
 function generateToken(userId, email, role) {
   return jwt.sign(
     { userId, email, role },
-    JWT_SECRET,
-    { expiresIn: '7d' }
+    signingSecret,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 }
 
 module.exports = {
   authenticate,
   requireAdmin,
-  generateToken
+  generateToken,
+  signingSecret
 };
 
