@@ -10854,6 +10854,30 @@ select optgroup {
     padding: 10px 14px !important;
 }
 
+/*
+ * Scroll stability: backdrop-filter creates a separate compositing surface for
+ * every glass card.  On long pages that surface can be discarded/repainted by
+ * the GPU while scrolling, causing the visible flash reported on dashboards.
+ * These repeated card surfaces use their existing opaque gradients instead.
+ */
+.stat-card,
+.action-card,
+.hero-stat-card,
+.route-card,
+.hot-flight-card,
+.feature-card,
+.feature-modern-card,
+.cabin-class-card,
+.testimonial-card,
+.about-story-card,
+.about-value-card,
+.contact-form-card {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
 /* Universal Synchronized Cards & Containers */
 .stat-card,
 .chart-card,
