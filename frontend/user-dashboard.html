@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard - SkyWings Airlines</title>
+    <link rel="icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
+    <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/card-stability.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" class="brand-link" aria-label="SkyWings home">
+                    <img src="images/transparent_logo.PNG" alt="SkyWings" class="nav-logo">
+                    <span class="brand-name">SkyWings</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="user-dashboard.html" class="active">Dashboard</a></li>
+                <li><a href="flight-search.html">Book Flight</a></li>
+                <li><a href="my-bookings.html">My Bookings</a></li>
+                <li><a href="check-in.html">Check-in</a></li>
+                <li><a href="user-about-contact.html">About & Contact</a></li>
+                <li><a href="user-profile.html">Profile</a></li>
+                <li><a href="index.html" onclick="handleLogout()">Logout</a></li>
+            </ul>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Dashboard Content -->
+    <div class="dashboard-container">
+        <div class="container">
+            <div class="dashboard-header">
+                <h1>Welcome back, <span id="userName">User</span>!</h1>
+                <p>Manage your flights and bookings</p>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">✈️</div>
+                    <div class="stat-info">
+                        <h3 id="totalBookings">0</h3>
+                        <p>Total Bookings</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🎫</div>
+                    <div class="stat-info">
+                        <h3 id="upcomingFlights">0</h3>
+                        <p>Upcoming Flights</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-info">
+                        <h3 id="completedTrips">0</h3>
+                        <p>Completed Trips</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-info">
+                        <h3>$<span id="totalSpent">0</span></h3>
+                        <p>Total Spent</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="dashboard-section">
+                <h2>Quick Actions</h2>
+                <div class="action-grid">
+                    <a href="flight-search.html" class="action-card">
+                        <div class="action-icon">🔍</div>
+                        <h3>Search Flights</h3>
+                        <p>Find and book your next flight</p>
+                    </a>
+                    <a href="my-bookings.html" class="action-card">
+                        <div class="action-icon">📋</div>
+                        <h3>My Bookings</h3>
+                        <p>View all your bookings</p>
+                    </a>
+                    <a href="check-in.html" class="action-card">
+                        <div class="action-icon">✅</div>
+                        <h3>Check-in</h3>
+                        <p>Check-in for your flight</p>
+                    </a>
+                    <a href="flight-search.html" class="action-card">
+                        <div class="action-icon">📊</div>
+                        <h3>Flight Status</h3>
+                        <p>Track your flight status</p>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Upcoming Flights -->
+            <div class="dashboard-section">
+                <h2>Upcoming Flights</h2>
+                <div class="flights-list" id="upcomingFlightsList">
+                    <div class="empty-state">
+                        <p>No upcoming flights. <a href="flight-search.html">Book a flight now!</a></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Bookings -->
+            <div class="dashboard-section">
+                <h2>Recent Bookings</h2>
+                <div class="bookings-table-container">
+                    <table class="bookings-table">
+                        <thead>
+                            <tr>
+                                <th>Booking ID</th>
+                                <th>Flight</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentBookingsTable">
+                            <tr>
+                                <td colspan="5" class="empty-state">No recent bookings</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
+
