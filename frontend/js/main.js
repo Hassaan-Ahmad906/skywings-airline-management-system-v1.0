@@ -5658,7 +5658,7 @@ async function loadAdminBookings() {
             
             let totalCount = allBookings.length;
             let upcomingCount = 0;
-            let boardedCount = 0;
+            let confirmedCount = 0;
             let pendingCount = 0;
             let cancelledCount = 0;
             
@@ -5670,14 +5670,14 @@ async function loadAdminBookings() {
 
             allBookings.forEach(booking => {
                 let status = (booking.status || 'pending').toLowerCase();
-                
-                if (status === 'boarded' || status === 'completed') {
-                    boardedCount++;
-                } else if (status === 'pending') {
-                    pendingCount++;
-                } else if (status === 'cancelled') {
-                    cancelledCount++;
+                if (status === 'completed' || status === 'boarded' || status === 'checked_in') {
+                    status = 'confirmed';
                 }
+
+                if (status === 'confirmed') confirmedCount++;
+                else if (status === 'pending') pendingCount++;
+                else if (status === 'cancelled') cancelledCount++;
+                else if (status === 'expired') {}
 
                 const depTime = booking.departure_datetime ? new Date(booking.departure_datetime) : new Date(booking.booking_date);
                 if (!isNaN(depTime) && depTime >= startOfToday) {
@@ -5710,7 +5710,7 @@ async function loadAdminBookings() {
 
             if (statTotal) statTotal.textContent = totalCount;
             if (statUpcoming) statUpcoming.textContent = upcomingCount;
-            if (statConfirmed) statConfirmed.textContent = boardedCount;
+            if (statConfirmed) statConfirmed.textContent = confirmedCount;
             if (statPending) statPending.textContent = pendingCount;
             if (statCancelled) statCancelled.textContent = cancelledCount;
 
