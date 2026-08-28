@@ -312,6 +312,12 @@ router.post('/:id/pay', async (req, res) => {
 
       await connection.commit();
 
+      // Dispatch payment confirmation email webhook to n8n
+      const emailWebhookService = require('../services/emailWebhookService');
+      emailWebhookService.triggerPaymentConfirmationWebhook(bookingId).catch(err => {
+        console.error('[BookingsRoute] Pay pending webhook trigger error:', err.message);
+      });
+
       res.json({
         success: true,
         message: 'Payment completed successfully! Booking is now CONFIRMED.'
