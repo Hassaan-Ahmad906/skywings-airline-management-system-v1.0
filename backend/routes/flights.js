@@ -19,16 +19,16 @@ router.get('/search', async (req, res) => {
         f.business_price,
         f.first_class_price,
         f.aircraft_id,
-        COALESCE(a.model, 'Standard Jet') as aircraft_model,
-        COALESCE(a.capacity, 180) as capacity,
-        COALESCE(dep.airport_code, f.from_airport_code) as from_code,
-        COALESCE(dep.airport_name, f.from_airport_code) as from_name,
-        COALESCE(dep.city, f.from_airport_code) as from_city,
-        COALESCE(dep.country, '') as from_country,
-        COALESCE(arr.airport_code, f.to_airport_code) as to_code,
-        COALESCE(arr.airport_name, f.to_airport_code) as to_name,
-        COALESCE(arr.city, f.to_airport_code) as to_city,
-        COALESCE(arr.country, '') as to_country,
+        a.model as aircraft_model,
+        a.capacity,
+        dep.airport_code as from_code,
+        dep.airport_name as from_name,
+        dep.city as from_city,
+        dep.country as from_country,
+        arr.airport_code as to_code,
+        arr.airport_name as to_name,
+        arr.city as to_city,
+        arr.country as to_country,
         CASE 
           WHEN ? = 'economy' THEN f.base_price
           WHEN ? = 'business' THEN f.business_price
@@ -43,9 +43,9 @@ router.get('/search', async (req, res) => {
           )
         ) as available_seats
       FROM flights f
-      LEFT JOIN airports dep ON f.from_airport_code = dep.airport_code
-      LEFT JOIN airports arr ON f.to_airport_code = arr.airport_code
-      LEFT JOIN aircraft a ON f.aircraft_id = a.aircraft_id
+      INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
+      INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
+      INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
       WHERE f.status IN ('scheduled', 'boarding')
         AND f.departure_datetime > CURRENT_TIMESTAMP
     `;
@@ -102,7 +102,7 @@ router.get('/search', async (req, res) => {
 // ========== GET ALL AIRPORTS ==========
 router.get('/airports', async (req, res) => {
   try {
-    const airports = await query('SELECT airport_code, airport_name, city, country FROM airports ORDER BY city ASC');
+    const airports = await query('SELECT * FROM airports ORDER BY city ASC');
     res.json({
       success: true,
       data: { airports: airports || [] }
@@ -131,20 +131,20 @@ router.get('/:id', async (req, res) => {
     const flights = await query(
       `SELECT 
         f.*,
-        COALESCE(a.model, 'Standard Jet') as aircraft_model,
-        COALESCE(a.capacity, 180) as capacity,
-        COALESCE(dep.airport_code, f.from_airport_code) as from_code,
-        COALESCE(dep.airport_name, f.from_airport_code) as from_name,
-        COALESCE(dep.city, f.from_airport_code) as from_city,
-        COALESCE(dep.country, '') as from_country,
-        COALESCE(arr.airport_code, f.to_airport_code) as to_code,
-        COALESCE(arr.airport_name, f.to_airport_code) as to_name,
-        COALESCE(arr.city, f.to_airport_code) as to_city,
-        COALESCE(arr.country, '') as to_country
+        a.model as aircraft_model,
+        a.capacity,
+        dep.airport_code as from_code,
+        dep.airport_name as from_name,
+        dep.city as from_city,
+        dep.country as from_country,
+        arr.airport_code as to_code,
+        arr.airport_name as to_name,
+        arr.city as to_city,
+        arr.country as to_country
        FROM flights f
-       LEFT JOIN airports dep ON f.from_airport_code = dep.airport_code
-       LEFT JOIN airports arr ON f.to_airport_code = arr.airport_code
-       LEFT JOIN aircraft a ON f.aircraft_id = a.aircraft_id
+       INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
+       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
+       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
        WHERE f.flight_id = ?`,
       [flightId]
     );
@@ -197,19 +197,19 @@ router.get('/status/:flightNumber', async (req, res) => {
     const flights = await query(
       `SELECT 
         f.*,
-        COALESCE(a.model, 'Standard Jet') as aircraft_model,
-        COALESCE(dep.airport_code, f.from_airport_code) as from_airport_code,
-        COALESCE(dep.airport_name, f.from_airport_code) as from_name,
-        COALESCE(dep.city, f.from_airport_code) as from_city,
-        COALESCE(dep.country, '') as from_country,
-        COALESCE(arr.airport_code, f.to_airport_code) as to_airport_code,
-        COALESCE(arr.airport_name, f.to_airport_code) as to_name,
-        COALESCE(arr.city, f.to_airport_code) as to_city,
-        COALESCE(arr.country, '') as to_country
+        a.model as aircraft_model,
+        dep.airport_code as from_airport_code,
+        dep.airport_name as from_name,
+        dep.city as from_city,
+        dep.country as from_country,
+        arr.airport_code as to_airport_code,
+        arr.airport_name as to_name,
+        arr.city as to_city,
+        arr.country as to_country
        FROM flights f
-       LEFT JOIN airports dep ON f.from_airport_code = dep.airport_code
-       LEFT JOIN airports arr ON f.to_airport_code = arr.airport_code
-       LEFT JOIN aircraft a ON f.aircraft_id = a.aircraft_id
+       INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
+       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
+       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
        WHERE f.flight_number = ?`,
       [flightNumber]
     );
@@ -237,6 +237,7 @@ router.get('/status/:flightNumber', async (req, res) => {
 const seatHoldService = require('../services/seatHoldService');
 const jwt = require('jsonwebtoken');
 const { signingSecret } = require('../middleware/auth');
+
 // ========== GET UNIFIED FLIGHT SEAT MAP ==========
 router.get('/:id/seat-map', async (req, res) => {
   try {
