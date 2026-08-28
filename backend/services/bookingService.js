@@ -149,7 +149,8 @@ class BookingService {
         total_amount: totalAmount,
         idempotency_key: idempotency_key,
         status: targetStatus,
-        payment_status: targetPayment
+        payment_status: targetPayment,
+        payment_method: bookingData.payment_method || 'Credit Card'
       });
 
       // 9. Process & validate seat allocations
@@ -201,10 +202,18 @@ class BookingService {
         await seatHoldRepository.markHoldsConsumed(connection, session_id, userId);
       }
 
-      // 13. Commit transaction
+      // 14. Commit transaction
       await connection.commit();
 
-      // 14. Fetch full details including tickets to return
+      // 15. Dispatch payment confirmation email webhook for confirmed paid bookings
+      if (targetStatus === 'CONFIRMED' && targetPayment === 'paid') {
+        const emailWebhookService = require('./emailWebhookService');
+        emailWebhookService.triggerPaymentConfirmationWebhook(bookingId).catch(err => {
+          console.error('[BookingService] Confirmation webhook trigger error:', err.message);
+        });
+      }
+
+      // 16. Fetch full details including tickets to return
       const fullBooking = await bookingRepository.findById(connection, bookingId);
       const tickets = await ticketRepository.findByBookingId(connection, bookingId);
       return { ...fullBooking, tickets };

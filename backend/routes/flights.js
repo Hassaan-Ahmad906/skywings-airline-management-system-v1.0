@@ -47,6 +47,7 @@ router.get('/search', async (req, res) => {
       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
       WHERE f.status IN ('scheduled', 'boarding')
+        AND f.departure_datetime > CURRENT_TIMESTAMP
     `;
 
     const params = [flightClass, flightClass, flightClass];
@@ -235,6 +236,7 @@ router.get('/status/:flightNumber', async (req, res) => {
 
 const seatHoldService = require('../services/seatHoldService');
 const jwt = require('jsonwebtoken');
+const { signingSecret } = require('../middleware/auth');
 
 // ========== GET UNIFIED FLIGHT SEAT MAP ==========
 router.get('/:id/seat-map', async (req, res) => {
@@ -254,7 +256,7 @@ router.get('/:id/seat-map', async (req, res) => {
 
     if (token) {
       try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'skywings_jwt_secret_key_2026');
+        const decoded = jwt.verify(token, signingSecret);
         currentUserId = decoded.userId || decoded.id;
       } catch (err) {
         // Unauthenticated or expired token -> proceed with null currentUserId

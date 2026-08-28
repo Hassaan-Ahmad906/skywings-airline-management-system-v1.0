@@ -12,17 +12,41 @@ const db = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const localOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+const configuredOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([...localOrigins, ...configuredOrigins]);
 
 const auditMiddleware = require('./middleware/auditMiddleware');
+
+app.disable('x-powered-by');
+
+// Security headers that do not require unsafe inline-script exceptions.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  next();
+});
 
 // Middleware
 app.use(auditMiddleware);
 app.use(cors({
-  origin: true, // Reflects the request origin, allowing requests from Vercel & localhost
+  origin(origin, callback) {
+    // Requests without an Origin header include same-origin navigation and health checks.
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    const error = new Error('CORS origin is not allowed');
+    error.status = 403;
+    return callback(error);
+  },
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 // parse cookies for server-side session handling
 app.use(cookieParser());
 

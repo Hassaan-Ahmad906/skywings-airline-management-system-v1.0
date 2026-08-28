@@ -8,6 +8,7 @@
     <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
     <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/card-stability.css">
     <script>
         (function() {
             try {
@@ -66,7 +67,7 @@
             </p>
 
             <div class="home-hero-buttons">
-                <a href="#quickSearch" class="btn btn-primary" onclick="document.getElementById('quickSearch')?.scrollIntoView({behavior: 'smooth'}); return false;">🔍 Book Your Flight</a>
+                <a href="flight-search.html" class="btn btn-primary">🔍 Book Your Flight</a>
                 <a href="#cabinClassesSection" class="btn btn-secondary" onclick="document.getElementById('cabinClassesSection')?.scrollIntoView({behavior: 'smooth'}); return false;">✨ Explore Fleet & Classes</a>
                 <a href="flight-search.html?tab=status" class="btn btn-secondary">📡 Live Flight Radar</a>
             </div>
@@ -93,46 +94,6 @@
                     <div class="hero-stat-number">99.4%</div>
                     <div class="hero-stat-label">On-Time Precision</div>
                 </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Quick Search / Booking Hub -->
-    <section class="quick-search" id="quickSearch">
-        <div class="container">
-            <div class="search-box">
-                <h2>Find & Book Your Next Journey</h2>
-                <form class="search-form" onsubmit="handleQuickSearch(event)">
-                    <div class="form-group">
-                        <label>🛫 Origin (From)</label>
-                        <select name="from" required>
-                            <option value="">Select Origin City</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>🛬 Destination (To)</label>
-                        <select name="to" required>
-                            <option value="">Select Destination City</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>📅 Departure Date</label>
-                        <input type="date" name="departure" required>
-                    </div>
-                    <div class="form-group">
-                        <label>👤 Passengers</label>
-                        <select name="passengers" required>
-                            <option value="1">1 Passenger</option>
-                            <option value="2">2 Passengers</option>
-                            <option value="3">3 Passengers</option>
-                            <option value="4">4 Passengers</option>
-                            <option value="5">5 Passengers</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="btn btn-primary">
-                        🔍 Find Flights →
-                    </button>
-                </form>
             </div>
         </div>
     </section>
