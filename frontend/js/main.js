@@ -175,6 +175,7 @@ async function apiRequest(endpoint, options = {}) {
         const error = new Error(message);
         error.code = data.error?.code || data.code;
         error.status = response.status;
+        error.requestId = data.request_id;
         throw error;
     }
     return data;
@@ -238,7 +239,8 @@ function getNormalizedPage() {
     if (!lastSegment || lastSegment === 'index.html') {
         return 'index.html';
     }
-    return lastSegment;
+    // Vercel serves clean URLs such as /login and /crew-portal.
+    return lastSegment.includes('.') ? lastSegment : `${lastSegment}.html`;
 }
 
 function isAuthOrLandingPage(page) {
@@ -337,6 +339,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (authState.isLoggedIn && isAuthOrLandingPage(page)) {
         if (authState.userRole === 'admin') {
             window.location.replace('admin-dashboard.html');
+        } else if (authState.userRole === 'crew') {
+            window.location.replace('crew-portal.html');
         } else {
             window.location.replace('user-dashboard.html');
         }
@@ -753,6 +757,15 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // Sample credentials are documented in README and apply only to the local seed database.
 
+function togglePasswordVisibility(button) {
+    const input = document.getElementById(button.getAttribute('aria-controls'));
+    if (!input) return;
+    const visible = input.type === 'password';
+    input.type = visible ? 'text' : 'password';
+    button.textContent = visible ? 'Hide password' : 'Show password';
+    button.setAttribute('aria-pressed', String(visible));
+}
+
 async function handleLogin(event) {
     event.preventDefault();
     const form = event.target;
@@ -777,9 +790,6 @@ async function handleLogin(event) {
     if (!password) {
         showFieldError(form, 'password', 'Password is required');
         hasErrors = true;
-    } else if (password.length < 6) {
-        showFieldError(form, 'password', 'Password must be at least 6 characters');
-        hasErrors = true;
     }
     
     if (hasErrors) {
@@ -792,13 +802,10 @@ async function handleLogin(event) {
     submitBtn.textContent = 'Signing in...';
     
     try {
-        console.log('Attempting login for:', email);
         const response = await apiRequest('/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password })
         });
-
-        console.log('Login API response:', response);
 
         // Validate response structure
         if (!response) {
@@ -820,9 +827,6 @@ async function handleLogin(event) {
         // Server set httpOnly cookie; populate client auth state from returned user
         setClientAuth(response.data.user);
 
-        console.log('Auth state populated, redirecting...');
-        console.log('User role:', response.data.user.role);
-
         // Get redirect destination if exists (sessionStorage)
         const redirectTo = sessionStorage.getItem('redirectAfterLogin');
         sessionStorage.removeItem('redirectAfterLogin');
@@ -837,8 +841,6 @@ async function handleLogin(event) {
             redirectUrl = (redirectTo && !redirectTo.includes('admin')) ? redirectTo : 'user-dashboard.html';
         }
         
-        console.log('Redirecting to:', redirectUrl);
-        
         // Set flag to prevent clearing auth data during redirect
         isRedirecting = true;
         isNavigating = true; // Mark as navigation to prevent logout on redirect
@@ -848,7 +850,6 @@ async function handleLogin(event) {
         window.location.replace(redirectUrl);
         
     } catch (error) {
-        console.error('Login error details:', error);
         let errorMessage = 'Login failed. Please check your credentials.';
         
         // Extract error message from various error formats
@@ -861,8 +862,10 @@ async function handleLogin(event) {
             errorMessage = error.errors.map(e => e.msg || e.message).join(', ');
         }
         
-        // Show error to user
-        alert('Login Error: ' + errorMessage); // Show alert for debugging
+        if (error.status === 401) {
+            errorMessage = 'Email or password does not match. Check the email address, capital letters and spaces in your password. Use Show password to check what you entered.';
+        }
+        if (error.requestId) errorMessage += ` Support reference: ${error.requestId}`;
         showFormError(form, errorMessage);
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
@@ -1334,9 +1337,12 @@ function showFormError(form, message) {
     // Add form error
     const errorDiv = document.createElement('div');
     errorDiv.className = 'form-error';
+    errorDiv.setAttribute('role', 'alert');
+    errorDiv.setAttribute('tabindex', '-1');
     errorDiv.style.cssText = 'background: rgba(239, 68, 68, 0.1); border: 1px solid var(--danger); color: var(--danger); padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem;';
     errorDiv.textContent = message;
     form.insertBefore(errorDiv, form.firstChild);
+    errorDiv.focus();
 }
 
 function clearFormErrors(form) {

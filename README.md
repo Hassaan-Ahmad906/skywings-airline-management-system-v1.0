@@ -128,11 +128,15 @@ Sign in through the [login page](http://localhost:3000/login.html); the applicat
 
 The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 bookings**. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik and Ahmed Farooq. Flights are scheduled relative to the time of seeding. Passenger identities, addresses and passport references are synthetic; aircraft have compact demonstration cabins.
 
-Sample accounts are for local evaluation. Production startup rejects active known sample accounts and the default demo password.
+Sample accounts are for local evaluation. Production startup rejects active accounts using the published sample credentials and synthetic `.test` accounts.
 
 ### Login on a hosted installation
 
-Database migrations preserve hosted users and passwords; they do not copy the local sample accounts. The README sample password will therefore not sign in to a production installation. Use an account registered on that website or credentials provisioned for its database.
+Database migrations preserve hosted users and passwords; they do not copy the local sample accounts. Use an account registered on that website or credentials provisioned for its database.
+
+Login and registration support both `.html` paths and Vercel clean URLs. Redirects use the server-verified session, so a stale saved role cannot redirect a logged-out browser. Customer, admin and crew sessions each return to their own portal. Password fields include Show/Hide controls; password case and spaces are preserved exactly.
+
+When login fails, the inline message includes a support reference. An operator can search Render logs for that reference under `Authentication rejected:` or query the corresponding private `AUTH_LOGIN_FAILURE` audit record. The internal reason distinguishes `ACCOUNT_NOT_FOUND`, `PASSWORD_MISMATCH`, `PASSWORD_STORAGE_INVALID` and `ACCOUNT_INACTIVE`; the public response does not disclose these reasons for credential failures. No password or hash is logged. A missing account means the configured database needs investigation, while invalid storage can require the account recovery command below. Do not reset the whole database to troubleshoot authentication.
 
 An operator with database access can inspect or recover one existing account from an interactive terminal. Configure the database environment for the intended installation first and verify the target printed by the command:
 
@@ -195,8 +199,8 @@ npm run test:all
 | `npm run test:workflows` | Booking, holds, expiry, rebooking, boarding and support workflows |
 | `npm run test:seed` | Sample data, cabin capacity, lifecycle and repeat-seed safety |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
-| `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry and staff provisioning |
-| `npm run test:browser` | All 14 pages at desktop/mobile widths; registration/logout/re-login; complete customer, admin and crew workflows |
+| `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry, staff provisioning, account recovery and private login diagnostics |
+| `npm run test:browser` | All 14 pages at desktop/mobile widths; signup/logout/re-login, password controls, stale session roles and HTML/clean URL redirects; complete customer, admin and crew workflows |
 
 Database/browser checks use disposable `skywings_test_*` databases rather than application records. External delivery is stubbed or disabled. `test:all` runs the seven checks sequentially and stops on failure. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
 

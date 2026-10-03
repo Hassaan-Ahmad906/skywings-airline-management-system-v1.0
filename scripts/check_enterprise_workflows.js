@@ -87,6 +87,26 @@ async function main(){ let server;
       assert.equal((await fetch(base+'/auth/check',{headers:{Cookie:cookie}})).status,401);
     }
     console.log('Registration/logout/login passed: new customer accounts, normalized Gmail aliases, exact password preservation and fresh sessions.');
+    await db.pool.execute("INSERT INTO users (first_name,last_name,email,password,role,status) VALUES ('Invalid','Hash','invalid.hash@example.test','legacy-or-truncated-hash','user','active')");
+    const references = new Set();
+    for (const [email,password,reason,status] of [
+      ['missing@example.test','TestPass123!','ACCOUNT_NOT_FOUND',401],
+      ['person2@example.test','WrongPassword123!','PASSWORD_MISMATCH',401],
+      ['invalid.hash@example.test','TestPass123!','PASSWORD_STORAGE_INVALID',401],
+      ['person3@example.test','TestPass123!','ACCOUNT_INACTIVE',403]
+    ]) {
+      const response = await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-Request-ID':'client-chosen-reference'},body:JSON.stringify({email,password})});
+      const body = await response.json(); assert.equal(response.status,status);
+      assert.match(body.request_id,/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+      assert.equal(response.headers.get('x-request-id'),body.request_id); assert.ok(!references.has(body.request_id)); references.add(body.request_id);
+      if(status === 401) assert.equal(body.message,'Invalid email or password');
+      assert.deepEqual(Object.keys(body).sort(),['message','request_id','success']);
+      assert.ok(!JSON.stringify(body).includes(reason)); assert.ok(!JSON.stringify(body).includes(password));
+      const [[event]] = await db.pool.execute("SELECT metadata,new_value FROM audit_logs WHERE action='AUTH_LOGIN_FAILURE' AND request_id=?",[body.request_id]);
+      const metadata = typeof event.metadata === 'string' ? JSON.parse(event.metadata) : event.metadata;
+      assert.equal(metadata.reason,reason); assert.ok(!JSON.stringify(event).includes(password));
+    }
+    console.log('Login diagnostics passed: unique server references match private audit reasons; public failures reveal no passwords, hashes or missing-account reason.');
     console.log('Account recovery passed: private inspection, existing active account only, default-password rejection, preserved admin role, session revocation, authenticated login and audit-failure rollback.');
     console.log('Enterprise workflow checks passed: real return search, multi-city reservation, atomic inventory/payment rollback, idempotency, ownership, expiry, ticket replay and admin-only crew provisioning.');
   } finally {

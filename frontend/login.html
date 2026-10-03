@@ -8,18 +8,6 @@
     <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
     <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
     <link rel="stylesheet" href="css/style.css">
-    <script>
-        (function() {
-            try {
-                var role = localStorage.getItem('skywings_auth_role');
-                if (role === 'admin') {
-                    window.location.replace('admin-dashboard.html');
-                } else if (role === 'user') {
-                    window.location.replace('user-dashboard.html');
-                }
-            } catch (e) {}
-        })();
-    </script>
 </head>
 <body class="auth-page dark-mode">
     <div class="auth-layout">
@@ -44,12 +32,15 @@
                 <form class="auth-form auth-form--spacious" onsubmit="handleLogin(event)">
                     <div class="form-group">
                         <label for="email">Email address</label>
-                        <input id="email" type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+                        <input id="email" type="email" name="email" placeholder="you@example.com" required autocomplete="username" autocapitalize="none" spellcheck="false">
                     </div>
 
                     <div class="form-group">
                         <label for="password">Password</label>
-                        <input id="password" type="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+                        <div class="password-control">
+                            <input id="password" type="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+                            <button type="button" class="password-toggle" aria-controls="password" aria-pressed="false" onclick="togglePasswordVisibility(this)">Show password</button>
+                        </div>
                         <a href="#" class="forgot-link" onclick="alert('Password reset feature coming soon!'); return false;">Forgot password?</a>
                     </div>
 

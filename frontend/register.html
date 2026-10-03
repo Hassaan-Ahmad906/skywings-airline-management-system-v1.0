@@ -8,18 +8,6 @@
     <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
     <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
     <link rel="stylesheet" href="css/style.css">
-    <script>
-        (function() {
-            try {
-                var role = localStorage.getItem('skywings_auth_role');
-                if (role === 'admin') {
-                    window.location.replace('admin-dashboard.html');
-                } else if (role === 'user') {
-                    window.location.replace('user-dashboard.html');
-                }
-            } catch (e) {}
-        })();
-    </script>
 </head>
 <body class="auth-page dark-mode">
     <div class="auth-layout">
@@ -55,17 +43,24 @@
 
                     <div class="form-group">
                         <label for="regEmail">Email address</label>
-                        <input id="regEmail" type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+                        <input id="regEmail" type="email" name="email" placeholder="you@example.com" required autocomplete="username" autocapitalize="none" spellcheck="false">
                     </div>
 
                     <div class="form-group">
                         <label for="regPassword">Password</label>
-                        <input id="regPassword" type="password" name="password" placeholder="Create a password" required minlength="6" autocomplete="new-password">
+                        <div class="password-control">
+                            <input id="regPassword" type="password" name="password" placeholder="Create a password" required minlength="6" autocomplete="new-password" aria-describedby="passwordRequirements">
+                            <button type="button" class="password-toggle" aria-controls="regPassword" aria-pressed="false" onclick="togglePasswordVisibility(this)">Show password</button>
+                        </div>
+                        <p id="passwordRequirements" class="password-help">At least 6 characters, including uppercase, lowercase and a number. Passwords are case-sensitive.</p>
                     </div>
 
                     <div class="form-group">
                         <label for="confirmPassword">Confirm password</label>
-                        <input id="confirmPassword" type="password" name="confirmPassword" placeholder="Confirm password" required autocomplete="new-password">
+                        <div class="password-control">
+                            <input id="confirmPassword" type="password" name="confirmPassword" placeholder="Confirm password" required autocomplete="new-password">
+                            <button type="button" class="password-toggle" aria-controls="confirmPassword" aria-pressed="false" onclick="togglePasswordVisibility(this)">Show password</button>
+                        </div>
                     </div>
 
                     <button type="submit" class="btn btn-primary btn-block">Create Account</button>

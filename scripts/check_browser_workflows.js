@@ -158,23 +158,75 @@ async function main() {
     await adminCtx.close();
     for (const width of [1280,390]) {
       const { context: signupCtx, page: signupPage } = await context(null,width);
-      signupPage.on('dialog', dialog => dialog.accept());
+      const authDialogs = [];
+      signupPage.on('dialog', dialog => { authDialogs.push(dialog.message()); dialog.dismiss(); });
       const email = `browser.signup.${width}@example.test`, password = 'BrowserSignup123!';
       await signupPage.goto(base+'/register.html',{waitUntil:'domcontentloaded'});
       await signupPage.locator('[name="firstName"]').fill('Ali'); await signupPage.locator('[name="lastName"]').fill('Raza');
       await signupPage.locator('[name="email"]').fill(email); await signupPage.locator('[name="password"]').fill(password); await signupPage.locator('[name="confirmPassword"]').fill(password);
+      for (const id of ['regPassword','confirmPassword']) {
+        const toggle = signupPage.locator(`button[aria-controls="${id}"]`);
+        await toggle.click(); assert.equal(await signupPage.locator('#'+id).getAttribute('type'),'text');
+        assert.equal(await signupPage.locator('#'+id).inputValue(),password);
+        await toggle.click(); assert.equal(await toggle.getAttribute('aria-pressed'),'false');
+      }
       await signupPage.getByRole('button',{name:'Create Account',exact:true}).click(); await signupPage.waitForURL('**/user-dashboard.html');
       if(width===390) await signupPage.getByRole('button',{name:'Toggle navigation',exact:true}).click();
       await signupPage.getByRole('link',{name:'Logout',exact:true}).click(); await signupPage.waitForURL('**/index.html');
       await signupPage.goto(base+'/login.html',{waitUntil:'domcontentloaded'});
+      authDialogs.length = 0;
+      await signupPage.locator('[name="email"]').fill(email); await signupPage.locator('[name="password"]').fill('WrongPassword123!');
+      const rejected = signupPage.waitForResponse(response => response.url().endsWith('/auth/login'));
+      await signupPage.getByRole('button',{name:'Sign In',exact:true}).click();
+      const rejectedBody = await (await rejected).json();
+      await signupPage.locator('.form-error').waitFor();
+      assert.match(await signupPage.locator('.form-error').innerText(),/Support reference:/);
+      assert.ok((await signupPage.locator('.form-error').innerText()).includes(rejectedBody.request_id));
+      assert.equal(await signupPage.locator('.form-error').getAttribute('role'),'alert');
+      assert.deepEqual(authDialogs,[],'Login errors must stay inline without a blocking debug alert');
       await signupPage.locator('[name="email"]').fill(email); await signupPage.locator('[name="password"]').fill(password);
+      await signupPage.getByRole('button',{name:'Show password',exact:true}).click();
+      assert.equal(await signupPage.locator('[name="password"]').getAttribute('type'),'text');
+      assert.equal(await signupPage.locator('[name="password"]').inputValue(),password);
+      await signupPage.getByRole('button',{name:'Hide password',exact:true}).click();
       await signupPage.getByRole('button',{name:'Sign In',exact:true}).click(); await signupPage.waitForURL('**/user-dashboard.html');
       const authenticated = await signupCtx.request.get(base+'/api/auth/check'); assert.equal(authenticated.status(),200);
       assert.equal((await authenticated.json()).data.user.email,email);
       await signupCtx.close();
     }
+    // Model Vercel clean URLs while serving the same real HTML and API locally.
+    async function cleanUrls(ctx) {
+      await ctx.route(url => ['login','register','crew-portal','admin-dashboard','user-dashboard'].includes(new URL(url).pathname.slice(1)), async route => {
+        const url = new URL(route.request().url()); url.pathname += '.html';
+        await route.fulfill({ response: await route.fetch({url:url.href}) });
+      });
+    }
+    for (const role of ['user','admin','crew']) {
+      const { context: staleCtx, page: stalePage } = await context(null,390);
+      await cleanUrls(staleCtx);
+      await staleCtx.addInitScript(role => localStorage.setItem('skywings_auth_role',role),role);
+      for (const file of ['login.html','register.html','login','register']) {
+        const navigations = [];
+        const track = request => { if(request.isNavigationRequest()) navigations.push(new URL(request.url()).pathname); };
+        stalePage.on('request',track);
+        await stalePage.goto(base+'/'+file,{waitUntil:'domcontentloaded'});
+        await stalePage.waitForFunction(() => localStorage.getItem('skywings_auth_role') === null);
+        assert.equal(new URL(stalePage.url()).pathname,'/'+file);
+        assert.deepEqual(navigations,['/'+file],'Stale roles must not redirect through protected dashboards');
+        stalePage.off('request',track);
+      }
+      await staleCtx.close();
+      const { context: validCtx, page: validPage } = await context(role,1280);
+      await cleanUrls(validCtx);
+      const destination = role === 'crew' ? 'crew-portal.html' : role+'-dashboard.html';
+      for (const file of ['login.html','register.html','login','register']) {
+        await validPage.goto(base+'/'+file,{waitUntil:'domcontentloaded'});
+        await validPage.waitForURL('**/'+destination);
+      }
+      await validCtx.close();
+    }
     assert.deepEqual(errors, []); assert.deepEqual(failures, []);
-    console.log('Browser checks passed: all 14 pages at desktop/mobile widths; new account registration/logout/re-login; one-way, return and three-leg multi-city booking; seat hold/reset, check-in, QR, crew boarding, gate audit, inbox resolve/delete/restore and persisted contact.');
+    console.log('Browser checks passed: all 14 pages at desktop/mobile widths; signup/logout/re-login, password visibility, inline login support references, stale roles and authenticated redirects on HTML/clean URLs for all roles; one-way, return and three-leg multi-city booking; seat hold/reset, check-in, QR, crew boarding, gate audit, inbox resolve/delete/restore and persisted contact.');
   } finally {
     if (browser) await browser.close(); if (server) await new Promise(resolve => server.close(resolve)); await db.pool.end();
     const connection = await setup.openConnection();

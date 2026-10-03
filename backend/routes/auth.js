@@ -1,10 +1,36 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const { randomUUID } = require('node:crypto');
 const { body, validationResult } = require('express-validator');
 const { query, queryOne } = require('../config/database');
 const { generateToken } = require('../middleware/auth');
 
 const router = require('../middleware/asyncRouter')();
+
+async function loginFailure(req, res, user, reason, status = 401) {
+  // Always generate the support reference server-side, independently of client headers.
+  const reference = randomUUID();
+  req.id = reference;
+  res.setHeader('X-Request-ID', reference);
+  const audit = require('../services/auditService');
+  await audit.logEvent({
+    userId: user?.user_id || null,
+    action: audit.ACTIONS.AUTH_LOGIN_FAILURE,
+    resourceType: 'USER',
+    resourceId: user?.user_id || null,
+    newValue: { email: req.body.email },
+    metadata: { reason },
+    req,
+    status: 'FAILURE'
+  });
+  // Correlation works in hosted logs even when the audit database is unavailable.
+  console.warn('Authentication rejected:', JSON.stringify({ reference, reason }));
+  return res.status(status).json({
+    success: false,
+    message: status === 403 ? 'Account is inactive. Please contact support.' : 'Invalid email or password',
+    request_id: reference
+  });
+}
 
 // ========== REGISTER ==========
 router.post('/register', [
@@ -153,55 +179,21 @@ router.post('/login', [
     const auditService = require('../services/auditService');
 
     if (!user) {
-      await auditService.logEvent({
-        userId: null,
-        action: auditService.ACTIONS.AUTH_LOGIN_FAILURE,
-        resourceType: 'USER',
-        resourceId: null,
-        newValue: { email },
-        req,
-        status: 'FAILURE'
-      });
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
+      return loginFailure(req, res, null, 'ACCOUNT_NOT_FOUND');
     }
 
     // Check if user is active
     if (user.status !== 'active') {
-      await auditService.logEvent({
-        userId: user.user_id,
-        action: auditService.ACTIONS.AUTH_LOGIN_FAILURE,
-        resourceType: 'USER',
-        resourceId: user.user_id,
-        oldValue: { status: user.status },
-        newValue: { email },
-        req,
-        status: 'FAILURE'
-      });
-      return res.status(403).json({
-        success: false,
-        message: 'Account is inactive. Please contact support.'
-      });
+      return loginFailure(req, res, user, 'ACCOUNT_INACTIVE', 403);
     }
 
+    if (!/^\$2[aby]\$\d{2}\$[A-Za-z0-9./]{53}$/.test(user.password || '')) {
+      return loginFailure(req, res, user, 'PASSWORD_STORAGE_INVALID');
+    }
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      await auditService.logEvent({
-        userId: user.user_id,
-        action: auditService.ACTIONS.AUTH_LOGIN_FAILURE,
-        resourceType: 'USER',
-        resourceId: user.user_id,
-        newValue: { email },
-        req,
-        status: 'FAILURE'
-      });
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
+      return loginFailure(req, res, user, 'PASSWORD_MISMATCH');
     }
 
     // Generate token
