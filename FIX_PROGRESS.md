@@ -87,6 +87,14 @@ The user subsequently removed the usage-limit constraint and asked to remember c
 
 ## Important context
 
+## Dashboard reconciliation and TiDB follow-up (2026-10-04)
+
+- Shared backend definitions now reconcile dashboard, customer profile, reports and CSV exports. Paid booking value retains paid no-shows and excludes refunded/unpaid records; occupancy uses passenger counts and two-decimal precision. Upcoming flags come from the server, and completed/boarded and cancelled/expired filters remain distinct.
+- Verification passed: all eight `npm run test:all` checks, 44 regressions, and an additional metrics rerun after final filter/precision changes. Metrics checks use disposable MySQL and Chromium, 510 flights, mobile/desktop views and two time zones. No application records were mutated.
+- User explicitly selected TiDB for account replacement and flight reseeding. The hosted public search returned 200 flights with 3,661 overlapping aircraft assignment pairs; booked/protected records cannot be classified through public search. Private audit outputs are in artifacts/hosted-flight-audit.json and artifacts/hosted-flight-integrity.json.
+- TiDB reseeding is pending connection access. Even after the user replied “configured”, the workspace .env still resolves to localhost / skywings_airlines (last modified 2026-10-03). Requested the exact local file be configured privately; do not reset localhost as a substitute.
+- Next: verify the configured TiDB target and TLS, inspect private counts/dependencies and booked flight protections, take and verify a recoverable backup, replace authorized sample data with valid Pakistani records, and verify signup/logout/relogin plus dashboard reconciliation on the hosted installation. Do not bypass production sample-account/payment protections or publish secrets.
+
 - Node/Express/MySQL application; frontend is vanilla HTML/CSS/JS.
 - Local MySQL80 service is running and existing connection works.
 - There is no AGENTS.md found in this repository.
