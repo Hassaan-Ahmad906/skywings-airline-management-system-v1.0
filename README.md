@@ -197,7 +197,7 @@ npm run test:all
 | `npm test` | Independent security, authorization, inventory and workflow regressions |
 | `npm run test:schema` | Fresh schema, legacy upgrades and repeated migrations |
 | `npm run test:workflows` | Booking, holds, expiry, rebooking, boarding and support workflows |
-| `npm run test:seed` | Sample data, cabin capacity, lifecycle and repeat-seed safety |
+| `npm run test:seed` | Sample data, capacity, lifecycle, repeat-seed safety, login for all 14 accounts and portal/new-customer re-login after logout |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
 | `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry, staff provisioning, account recovery and private login diagnostics |
 | `npm run test:browser` | All 14 pages at desktop/mobile widths; signup/logout/re-login, password controls, stale session roles and HTML/clean URL redirects; complete customer, admin and crew workflows |
