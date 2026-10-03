@@ -120,9 +120,9 @@ The API health endpoint is `GET /api/health`.
 
 | Portal | Local address | Sample email | Sample password |
 | --- | --- | --- | --- |
-| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` | `DemoPass123!` |
-| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `DemoPass123!` |
-| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `DemoPass123!` |
+| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` | `admin123` |
+| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `user123` |
+| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `crew12345678` |
 
 Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
 
