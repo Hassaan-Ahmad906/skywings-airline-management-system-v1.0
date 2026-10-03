@@ -118,23 +118,38 @@ The API health endpoint is `GET /api/health`.
 
 ## Portals and sample accounts
 
-| Portal | Local address | Sample email |
-| --- | --- | --- |
-| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` |
-| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` |
-| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` |
+### Hosted customer samples
 
-The local `db:seed` script uses `DemoPass123!` for all sample accounts. Hosted TiDB accounts use unique passwords saved in the private credentials file described below. Editing this README does not change database passwords.
+Sign in at the [live SkyWings login page](https://skywings-airline-management-system.vercel.app/login). These public sample accounts have customer access and synthetic Pakistani profiles:
+
+| Name | Email | Password |
+| --- | --- | --- |
+| Ali Raza | `sample.ali.raza.2026@example.com` | `AliSample2026!` |
+| Fatima Malik | `sample.fatima.malik.2026@example.com` | `FatimaSample2026!` |
+
+Verified on **4 October 2026**: both accounts signed up, logged out and logged back in on the live website. Desktop and mobile customer dashboards were checked. These are shared public accounts; use your own registered account for personal bookings or passenger details. Hosted admin and crew passwords are private because those accounts access booking records and gate operations.
+
+### Local sample accounts
+
+Run `npm run db:setup` and `npm run db:seed` against a fresh local development database before using these credentials:
+
+| Portal | Local address | Sample email | Password |
+| --- | --- | --- | --- |
+| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` | `DemoPass123!` |
+| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `DemoPass123!` |
+| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `DemoPass123!` |
+
+The local `db:seed` script uses `DemoPass123!` for all sample accounts. The TiDB reseed creates separate accounts with unique private passwords. Editing this README does not change database passwords; the public hosted samples above have been provisioned separately.
 
 Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
 
 The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 bookings**. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik and Ahmed Farooq. Flights are scheduled relative to the time of seeding. Passenger identities, addresses and passport references are synthetic; aircraft have compact demonstration cabins.
 
-Sample accounts are for local evaluation. Production startup rejects active accounts using the published sample credentials and synthetic `.test` accounts.
+The local default credentials are for local evaluation. Production startup rejects the known local default passwords on the three portal accounts and active synthetic `.test` accounts.
 
 ### Login on a hosted installation
 
-For the TiDB account reseed, use the unique credentials saved privately in `artifacts/tidb-sample-accounts.json` on the operator's computer. These passwords are not the published local demo password or values typed into this README. The credentials file, environment file and SQL backups must remain outside Git.
+The public hosted customer credentials are listed above. For the private accounts created by the TiDB reseed, including hosted admin and crew, use `artifacts/tidb-sample-accounts.json` on the operator's computer. Their passwords differ from the local demo password. This private credentials file, environment file and SQL backups must remain outside Git.
 
 Database migrations preserve hosted users and passwords; they do not copy the local sample accounts. Use an account registered on that website or credentials provisioned for its database.
 
