@@ -124,6 +124,8 @@ The API health endpoint is `GET /api/health`.
 | Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `user123` |
 | Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `crew12345678` |
 
+Changing the credentials listed in this table does not change database passwords. The local `db:seed` script currently creates all sample accounts with `DemoPass123!`; different credentials must first be provisioned or reset in the intended database. Hosted account credentials have to be verified against that hosted database.
+
 Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
 
 The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 bookings**. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik and Ahmed Farooq. Flights are scheduled relative to the time of seeding. Passenger identities, addresses and passport references are synthetic; aircraft have compact demonstration cabins.
