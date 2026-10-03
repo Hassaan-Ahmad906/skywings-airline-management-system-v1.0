@@ -20,7 +20,7 @@ Data/report follow-up: 4 October 2026, Asia/Karachi. Shared dashboard/report met
 
 ## Test evidence
 
-Hosted data follow-up (4 October 2026): a read-only public search returned 200 flights with 3,661 overlapping aircraft assignment pairs. The user requested TiDB reseeding. Private hosted records and booking dependencies remain uninspected because the workspace connection still points to localhost; reseeding has not been performed. The clean local data audit does not certify the hosted schedule.
+Hosted data follow-up (4 October 2026): the TiDB reseed preserved all booking, financial, ticket and audit history, retired 33 old logins, created 14 fresh Pakistani accounts and 240 future flights, removed 11,818 unreferenced flights and reconciled four aircraft capacities to their 852 physical seats. The pre-change snapshot was restored and contents verified in TiDB. A disposable TiDB test proved backup-drift refusal, full rollback on failure and preservation of referenced records. All 14 fresh accounts passed actual hosted API login/logout checks; customer/admin/crew browser portals, new registration/logout/relogin, dashboard/report reconciliation and the production account guard passed. Future aircraft conflicts are zero. Historical flight schedules remain untouched. A full replacement was rejected by automatic approval review and was not performed.
 
 | Check | Result |
 | --- | --- |

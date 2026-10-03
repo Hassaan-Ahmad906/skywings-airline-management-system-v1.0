@@ -118,13 +118,13 @@ The API health endpoint is `GET /api/health`.
 
 ## Portals and sample accounts
 
-| Portal | Local address | Sample email | Sample password |
-| --- | --- | --- | --- |
-| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` | `admin123` |
-| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `user123` |
-| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `crew12345678` |
+| Portal | Local address | Sample email |
+| --- | --- | --- |
+| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` |
+| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` |
+| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` |
 
-Changing the credentials listed in this table does not change database passwords. The local `db:seed` script currently creates all sample accounts with `DemoPass123!`; different credentials must first be provisioned or reset in the intended database. Hosted account credentials have to be verified against that hosted database.
+The local `db:seed` script uses `DemoPass123!` for all sample accounts. Hosted TiDB accounts use unique passwords saved in the private credentials file described below. Editing this README does not change database passwords.
 
 Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
 
@@ -133,6 +133,8 @@ The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 28
 Sample accounts are for local evaluation. Production startup rejects active accounts using the published sample credentials and synthetic `.test` accounts.
 
 ### Login on a hosted installation
+
+For the TiDB account reseed, use the unique credentials saved privately in `artifacts/tidb-sample-accounts.json` on the operator's computer. These passwords are not the published local demo password or values typed into this README. The credentials file, environment file and SQL backups must remain outside Git.
 
 Database migrations preserve hosted users and passwords; they do not copy the local sample accounts. Use an account registered on that website or credentials provisioned for its database.
 
@@ -156,6 +158,26 @@ npm run db:reset
 ```
 
 **This replaces the local application database.** Reset is restricted to the development `skywings_airlines` database on localhost. If an existing database is present, it first saves a private SQL backup under `backups/`, restores it into an isolated database and verifies table row counts before resetting and reseeding. Backups are excluded from Git.
+
+### Reseeding TiDB while preserving history
+
+Configure the private local `.env` with the intended TiDB connection and `DB_SSL=true`. Create a consistent snapshot and verify its contents by restoring it into a temporary schema:
+
+```sh
+npm run db:backup
+```
+
+Use the private backup path printed by that command:
+
+```sh
+npm run db:seed:tidb -- --reseed skywings_airlines --backup backups/YOUR_BACKUP.sql
+```
+
+This command accepts only the named TiDB database with verified TLS and a recent, checksum-matched, restore-verified backup. It refuses unexpected schemas or records changed since the backup. The database user must have permission to create/drop the isolated restore schema.
+
+The transaction retires previous logins and revokes their sessions while preserving account IDs for historical references. It preserves bookings, recorded payments, tickets, audits and referenced flights. It removes only flights with no booking, ticket, hold, allocation, disruption or audit reference. Four active aircraft are required; capacity values are reconciled to their existing physical seats. It creates 14 Pakistani sample accounts, saved passenger profiles, sample feedback and 240 future flights over 30 days with return rotations and turnaround time. No simulated paid bookings are created. New customers start with zero spending; the admin reports retain historical paid booking value.
+
+Unique passwords are written to the private `artifacts/tidb-sample-accounts.json` file and are never printed or committed. Previous logins are inactive and use archived email identities; original email mappings remain in the private reseed audit. A failed transaction rolls back all database changes. This is an operator command, not an automatic deployment seed.
 
 ## Workflow rules
 
@@ -216,6 +238,7 @@ npm run test:all
 | `npm run test:schema` | Fresh schema, legacy upgrades and repeated migrations |
 | `npm run test:workflows` | Booking, holds, expiry, rebooking, boarding and support workflows |
 | `npm run test:seed` | Sample data, capacity, lifecycle, repeat-seed safety, login for all 14 accounts and portal/new-customer re-login after logout |
+| `npm run test:tidb-seed` | Optional cloud/disposable-schema check: backup drift refusal, rollback, preserved financial/ticket records, retired sessions, production-safe credentials and non-overlapping new flights |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
 | `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry, staff provisioning, account recovery and private login diagnostics |
 | `npm run test:metrics` | Dashboard/report/customer reconciliation, occupancy and recorded fares, exact-state filters, all flight pages and desktop/mobile checks in different time zones |
