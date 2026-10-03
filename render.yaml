@@ -1,0 +1,34 @@
+# Separate public demo service. No credentials from the primary deployment.
+services:
+  - type: web
+    name: skywings-public-demo
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run start:public-demo
+    healthCheckPath: /api/health
+    envVars:
+      - key: PUBLIC_DEMO
+        value: 'true'
+      - key: NODE_ENV
+        value: development
+      - key: PAYMENT_MODE
+        value: demo
+      - key: NOTIFICATIONS_ENABLED
+        value: 'false'
+      - key: DB_NAME
+        value: skywings_public_demo
+      - key: DB_SSL
+        value: 'true'
+      - key: DB_TIMEZONE
+        value: Z
+      - key: DB_PORT
+        value: '4000'
+      - key: DB_HOST
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

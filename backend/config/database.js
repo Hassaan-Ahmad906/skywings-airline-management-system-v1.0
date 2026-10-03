@@ -23,6 +23,7 @@ const dbConfig = {
   charset: 'utf8mb4',
   multipleStatements: false,
   dateStrings: false,
+  timezone: process.env.DB_TIMEZONE || ((process.env.DB_HOST || '').endsWith('.tidbcloud.com') ? 'Z' : 'local'),
   ssl: (process.env.DB_SSL === 'true' || (process.env.DB_HOST && process.env.DB_HOST.includes('tidbcloud.com'))) ? {
     minVersion: 'TLSv1.2',
     rejectUnauthorized: true

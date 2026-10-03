@@ -118,6 +118,30 @@ The API health endpoint is `GET /api/health`.
 
 ## Portals and sample accounts
 
+### Isolated public demo on TiDB
+
+The separate `skywings_public_demo` TiDB database contains synthetic Pakistani passengers, bookings and flights. These are its actual portal credentials:
+
+| Portal | Email | Password |
+| --- | --- | --- |
+| Customer: Ali Raza | `demo.user@public-demo.example.com` | `DemoUser2026!` |
+| Administrator: Ahmed Farooq | `demo.admin@public-demo.example.com` | `DemoAdmin2026!` |
+| Airport crew: Hamza Iqbal, Karachi (`KHI`) | `demo.crew@public-demo.example.com` | `DemoCrew2026!` |
+
+These accounts authenticate only in the separate demo application. The current Vercel website uses `skywings_airlines` and has different staff credentials. The demo is prepared for a separate Render service; its public URL will be added after deployment. All demo accounts are shared and all payment confirmations are simulated.
+
+To run the prepared demo locally with its private TiDB connection:
+
+```sh
+npm run start:public-demo
+```
+
+Open [http://localhost:3001/login.html](http://localhost:3001/login.html). A fresh installation can copy [.env.public-demo.example](.env.public-demo.example) to the private `.env.public-demo`, configure the demo database connection and set a new random JWT secret. The launcher refuses the primary database, requires a distinct signing secret, uses UTC dates and disables external notifications. The isolated sample dataset has 14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 synthetic bookings. Repeat startup preserves the demo data; an incomplete seed refuses to start.
+
+Deploy a **separate** service using [render.yaml](render.yaml) in Render's Blueprint flow. Provide the demo database connection in Render's private environment fields and use a database user restricted to the demo schema. The Blueprint generates an independent JWT secret and runs `npm run start:public-demo`. It serves both the frontend and API from the new service. See [Render's Blueprint documentation](https://render.com/docs/infrastructure-as-code).
+
+An operator can restore the shared sample data and refresh its relative flight dates with `npm run db:reset:public-demo -- --reset`. This backs up and restore-verifies the isolated demo before rebuilding it. The reset command accepts only `skywings_public_demo`; it cannot reset `skywings_airlines`.
+
 ### Hosted customer samples
 
 Sign in at the [live SkyWings login page](https://skywings-airline-management-system.vercel.app/login). These public sample accounts have customer access and synthetic Pakistani profiles:
@@ -129,7 +153,19 @@ Sign in at the [live SkyWings login page](https://skywings-airline-management-sy
 
 Verified on **4 October 2026**: both accounts signed up, logged out and logged back in on the live website. Desktop and mobile customer dashboards were checked. These are shared public accounts; use your own registered account for personal bookings or passenger details. Hosted admin and crew passwords are private because those accounts access booking records and gate operations.
 
-### Local sample accounts
+### Hosted TiDB staff and private accounts
+
+The following hosted portal accounts also exist in the actual TiDB database; their roles, active status and stored password matches were verified on **4 October 2026**:
+
+| Hosted role | Email | Password location |
+| --- | --- | --- |
+| Customer (private account) | `user@skywings.com` | Operator's private `artifacts/tidb-sample-accounts.json` |
+| Administrator | `admin@skywings.com` | Operator's private `artifacts/tidb-sample-accounts.json` |
+| Airport crew, Karachi (`KHI`) | `crew@skywings.com` | Operator's private `artifacts/tidb-sample-accounts.json` |
+
+These hosted staff accounts control the current booking and gate records. Public credentials for all roles require a separate demo deployment with isolated synthetic records. Database connection values such as `DB_USER` and `DB_PASSWORD` are separate from website account credentials and belong in private environment configuration.
+
+### Local development credentials
 
 Run `npm run db:setup` and `npm run db:seed` against a fresh local development database before using these credentials:
 
@@ -139,7 +175,7 @@ Run `npm run db:setup` and `npm run db:seed` against a fresh local development d
 | Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `DemoPass123!` |
 | Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `DemoPass123!` |
 
-The local `db:seed` script uses `DemoPass123!` for all sample accounts. The TiDB reseed creates separate accounts with unique private passwords. Editing this README does not change database passwords; the public hosted samples above have been provisioned separately.
+**`DemoPass123!` works only with the local seeded accounts in this table; it does not authenticate the hosted TiDB portal accounts.** The TiDB reseed creates separate accounts with unique private passwords. Editing this README does not change database passwords; the public hosted customer samples above have been provisioned separately.
 
 Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
 
@@ -254,14 +290,15 @@ npm run test:all
 | `npm run test:workflows` | Booking, holds, expiry, rebooking, boarding and support workflows |
 | `npm run test:seed` | Sample data, capacity, lifecycle, repeat-seed safety, login for all 14 accounts and portal/new-customer re-login after logout |
 | `npm run test:tidb-seed` | Optional cloud/disposable-schema check: backup drift refusal, rollback, preserved financial/ticket records, retired sessions, production-safe credentials and non-overlapping new flights |
+| `npm run test:public-demo` | Isolated TiDB demo: three-role login/logout, portal browser checks, report reconciliation, primary-token rejection and unchanged primary records |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
 | `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry, staff provisioning, account recovery and private login diagnostics |
 | `npm run test:metrics` | Dashboard/report/customer reconciliation, occupancy and recorded fares, exact-state filters, all flight pages and desktop/mobile checks in different time zones |
 | `npm run test:browser` | All 14 pages at desktop/mobile widths; signup/logout/re-login, password controls, stale session roles and HTML/clean URL redirects; complete customer, admin and crew workflows |
 
-Database/browser checks use disposable `skywings_test_*` databases rather than application records. External delivery is stubbed or disabled. `test:all` runs the eight checks sequentially and stops on failure. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
+The eight checks in `test:all` use disposable `skywings_test_*` databases rather than application records. The optional `test:public-demo` uses the isolated `skywings_public_demo` database for its authentication/browser checks and reads the primary records to verify they stay unchanged. External delivery is stubbed or disabled. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
 
-**Last verified: 4 October 2026.** The independent regression suite has 44 passing tests, including schema startup protection, accurate CSV fields, valid SVG charts and stale-search response protection. All eight checks passed; metrics checks cover 510 flights, state/payment/expiry exclusions, customer ownership and browser reconciliation in Pakistan and US time zones. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. Full browser checks cover all 14 pages at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks do not certify production hosting, payment settlement or airport interoperability.
+**Last verified: 4 October 2026.** The independent regression suite has 48 passing tests, including public-demo isolation and UTC parsing for TiDB deadlines. The earlier eight-check run passed; follow-up checks also passed for the original seed on disposable TiDB and the isolated public demo's three portal roles, browser views, report totals and token separation. Metrics checks cover 510 flights, state/payment/expiry exclusions, customer ownership and browser reconciliation in Pakistan and US time zones. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. Full browser checks cover all 14 pages at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks do not certify production hosting, payment settlement or airport interoperability.
 
 ## Repository structure
 

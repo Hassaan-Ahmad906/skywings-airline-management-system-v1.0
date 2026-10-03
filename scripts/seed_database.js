@@ -36,27 +36,35 @@ async function checkInSeed(bookingId, userId, seats) {
     await connection.commit();
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
 }
-async function seedDatabase() {
+async function seedDatabase(options = {}) {
   if (process.env.NODE_ENV === 'production' || !paymentService.demoEnabled()) throw new Error('Sample seeding requires development/test mode and PAYMENT_MODE=demo');
+  const publicDemo = options.publicDemo === true;
+  const publicConfig = require('../backend/config/publicDemo');
+  if (publicDemo) publicConfig.validateEnvironment();
   const [[existing]] = await db.pool.execute('SELECT COUNT(*) AS count FROM users');
-  if (existing.count) { console.log('Database contains users; seeding skipped. Use db:reset for a fresh demo dataset.'); return { skipped: true }; }
+  if (existing.count) { console.log(`Database contains users; seeding skipped. Use ${publicDemo ? 'db:reset:public-demo -- --reset' : 'db:reset'} for a fresh demo dataset.`); return { skipped: true }; }
   const hash = await bcrypt.hash('DemoPass123!', 10);
+  const hashes = publicDemo ? Object.fromEntries(await Promise.all(Object.entries(publicConfig.accounts).map(async ([role,account]) => [role,await bcrypt.hash(account.password,10)]))) : { admin:hash,user:hash,crew:hash };
   const people = [];
+  const planeIds = [], flightIds = [];
+  let adminId;
   const connection = await db.pool.getConnection();
   try {
     await connection.beginTransaction();
-    await connection.execute("INSERT INTO users (first_name, last_name, email, password, role, address) VALUES ('Ahmed','Farooq','admin@skywings.com',?,'admin','Demo airline office, Karachi, Pakistan')", [hash]);
+    const [admin] = await connection.execute("INSERT INTO users (first_name, last_name, email, password, role, address) VALUES ('Ahmed','Farooq',?,?,'admin','Demo airline office, Karachi, Pakistan')", [publicDemo ? publicConfig.accounts.admin.email : 'admin@skywings.com',hashes.admin]);
+    adminId = admin.insertId;
     for (const [index, [first,last,city]] of names.entries()) {
-      const email = index === 0 ? 'user@skywings.com' : `${first}.${last}@example.test`.toLowerCase();
+      const email = index === 0 ? (publicDemo ? publicConfig.accounts.user.email : 'user@skywings.com') : `${first}.${last}@${publicDemo ? 'public-demo.example.com' : 'example.test'}`.toLowerCase();
       const dob = `${1988 + index}-05-15`;
-      const [user] = await connection.execute('INSERT INTO users (first_name, last_name, email, password, date_of_birth, address) VALUES (?, ?, ?, ?, ?, ?)', [first,last,email,hash,dob,`Demo neighbourhood, ${city}, Pakistan`]);
+      const [user] = await connection.execute('INSERT INTO users (first_name, last_name, email, password, date_of_birth, address) VALUES (?, ?, ?, ?, ?, ?)', [first,last,email,hashes.user,dob,`Demo neighbourhood, ${city}, Pakistan`]);
       const [passenger] = await connection.execute("INSERT INTO passengers (user_id, first_name, last_name, date_of_birth, passport_number, nationality, is_saved) VALUES (?, ?, ?, ?, ?, 'Pakistani', 1)", [user.insertId,first,last,dob,`PK-DEMO-${String(index+1).padStart(4,'0')}`]);
       people.push({ userId: user.insertId, passengerId: passenger.insertId });
     }
-    await connection.execute("INSERT INTO users (first_name,last_name,email,password,role,gate_airport_code) VALUES ('Hamza','Iqbal','crew@skywings.com',?,'crew','KHI')", [hash]);
+    await connection.execute("INSERT INTO users (first_name,last_name,email,password,role,gate_airport_code) VALUES ('Hamza','Iqbal',?,?,'crew','KHI')", [publicDemo ? publicConfig.accounts.crew.email : 'crew@skywings.com',hashes.crew]);
     for (const airport of airports) await connection.execute('INSERT INTO airports (airport_code, airport_name, city, country) VALUES (?, ?, ?, ?)', airport);
     for (const [index, model] of ['Airbus A320 (demo cabin)','Airbus A321 (demo cabin)','Boeing 737 (demo cabin)','Airbus A320 (demo cabin)'].entries()) {
       const [plane] = await connection.execute("INSERT INTO aircraft (model, registration, capacity, status) VALUES (?, ?, 72, 'active')", [model,`AP-SW${String.fromCharCode(65+index)}`]);
+      planeIds.push(plane.insertId);
       for (let row = 1; row <= 12; row++) for (const letter of ['A','B','C','D','E','F']) await connection.execute('INSERT INTO seats (aircraft_id, seat_number, seat_class, `row_number`, column_letter) VALUES (?, ?, ?, ?, ?)', [plane.insertId,`${row}${letter}`,row === 1 ? 'first' : row <= 3 ? 'business' : 'economy',row,letter]);
     }
     const routes = [['KHI','ISB'],['LHE','KHI'],['ISB','LHE'],['KHI','LHE'],['KHI','ISB'],['KHI','ISB'],['LHE','DXB'],['ISB','DOH'],['KHI','JED'],['PEW','KHI'],['MUX','ISB'],['SKT','RUH'],['UET','KHI'],['LYP','KHI']];
@@ -67,14 +75,18 @@ async function seedDatabase() {
       const international = ['DXB','DOH','JED','RUH'].includes(to);
       const arrival = new Date(departure.getTime() + (international ? 4 : 2)*3600000);
       const fare = international ? 260 : 120;
-      await connection.execute('INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price, business_price, first_class_price, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [`SW${201+i}`,i%4+1,from,to,departure,arrival,fare,fare*1.5,fare*2,i === 6 ? 'delayed' : 'scheduled']);
+      const [flight] = await connection.execute('INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price, business_price, first_class_price, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [`SW${201+i}`,planeIds[i%4],from,to,departure,arrival,fare,fare*1.5,fare*2,i === 6 ? 'delayed' : 'scheduled']);
+      flightIds.push(flight.insertId);
     }
-    for (let i = 0; i < 3; i++) await connection.execute("INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price, business_price, first_class_price) VALUES (?, ?, 'KHI','ISB', ?, ?, 120, 180, 240)", [`SW${901+i}`,i+2,new Date(now+3600000),new Date(now+3*3600000)]);
+    for (let i = 0; i < 3; i++) {
+      const [flight] = await connection.execute("INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price, business_price, first_class_price) VALUES (?, ?, 'KHI','ISB', ?, ?, 120, 180, 240)", [`SW${901+i}`,planeIds[i+1],new Date(now+3600000),new Date(now+3*3600000)]);
+      flightIds.push(flight.insertId);
+    }
     await connection.commit();
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
   async function book(personIndex, flightId, cabin = 'economy', seat = null, extra = []) {
     const person = people[personIndex];
-    return bookingService.createBooking(person.userId, { flight_id: flightId, class: cabin,
+    return bookingService.createBooking(person.userId, { flight_id: flightIds[flightId-1], class: cabin,
       idempotency_key: `seed-${personIndex}-${flightId}-${cabin}`,
       passengers: [{ passenger_id: person.passengerId, ...(seat ? { seat_number: seat } : {}) }, ...extra] });
   }
@@ -91,22 +103,22 @@ async function seedDatabase() {
   for (let i = 1; i < people.length; i++) await paid(i, i+7, i%3 === 0 ? 'business' : i%4 === 0 ? 'first' : 'economy', i%3 === 0 ? '2A' : i%4 === 0 ? '1A' : '4A');
   const moved = await paid(3,5,'economy','4D');
   const rebookConnection = await db.pool.getConnection();
-  try { await rebookConnection.beginTransaction(); await require('../backend/services/rebookingService').executeRebooking(rebookConnection,moved.booking_id,6,[], 'CUSTOMER_REQUEST', { userId:people[3].userId,role:'user' }, 'seed-rebooking'); await rebookConnection.commit(); }
+  try { await rebookConnection.beginTransaction(); await require('../backend/services/rebookingService').executeRebooking(rebookConnection,moved.booking_id,flightIds[5],[], 'CUSTOMER_REQUEST', { userId:people[3].userId,role:'user' }, 'seed-rebooking'); await rebookConnection.commit(); }
   catch(error) { await rebookConnection.rollback(); throw error; } finally { rebookConnection.release(); }
   const completed = await paid(0,61,'economy','4A');
   await checkInSeed(completed.booking_id, people[0].userId, ['4A']);
   const [tokens] = await db.pool.execute('SELECT boarding_token FROM booking_passengers WHERE booking_id = ?', [completed.booking_id]);
-  await db.pool.execute('UPDATE flights SET boarding_open = 1 WHERE flight_id = 61');
-  await require('../backend/services/boardingService').scan(tokens[0].boarding_token,61,{role:'admin',userId:1});
-  await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 30 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 30 DAY), INTERVAL 2 HOUR) WHERE flight_id = 61");
+  await db.pool.execute('UPDATE flights SET boarding_open = 1 WHERE flight_id = ?', [flightIds[60]]);
+  await require('../backend/services/boardingService').scan(tokens[0].boarding_token,flightIds[60],{role:'admin',userId:adminId});
+  await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 30 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 30 DAY), INTERVAL 2 HOUR) WHERE flight_id = ?", [flightIds[60]]);
   const cancelled = await paid(0,62,'economy','4B');
   await bookingService.cancelBooking(people[0].userId,cancelled.booking_id);
-  await db.pool.execute("UPDATE flights SET status = 'cancelled', departure_datetime = DATE_SUB(NOW(), INTERVAL 15 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 15 DAY), INTERVAL 2 HOUR) WHERE flight_id = 62");
+  await db.pool.execute("UPDATE flights SET status = 'cancelled', departure_datetime = DATE_SUB(NOW(), INTERVAL 15 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 15 DAY), INTERVAL 2 HOUR) WHERE flight_id = ?", [flightIds[61]]);
   const missed = await paid(0,63,'economy',null);
-  await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 7 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 7 DAY), INTERVAL 2 HOUR) WHERE flight_id = 63");
+  await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 7 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 7 DAY), INTERVAL 2 HOUR) WHERE flight_id = ?", [flightIds[62]]);
   await require('../backend/services/lifecycleService').runSweep();
   await db.pool.execute('UPDATE bookings SET booking_date = DATE_SUB(NOW(), INTERVAL 30 DAY) WHERE booking_id = ?', [completed.booking_id]);
-  await db.pool.execute("INSERT INTO contact_messages (name,email,category,message) VALUES ('Sana Ahmed','sana.ahmed@example.test','feedback','This is a synthetic support inquiry for the Pakistani demo dataset.')");
+  await db.pool.execute("INSERT INTO contact_messages (name,email,category,message) VALUES ('Sana Ahmed',?,'feedback','This is a synthetic support inquiry for the Pakistani demo dataset.')", [publicDemo ? 'sana.ahmed@public-demo.example.com' : 'sana.ahmed@example.test']);
   console.log('Pakistani demo data seeded: 14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and lifecycle examples.');
   return { people, checkedBookingId: checked.booking_id, completedBookingId: completed.booking_id, missedBookingId: missed.booking_id };
 }

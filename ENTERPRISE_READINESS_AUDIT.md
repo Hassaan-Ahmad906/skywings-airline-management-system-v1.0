@@ -2,7 +2,7 @@
 
 Reviewed: 3 October 2026, Asia/Karachi.
 
-Data/report follow-up: 4 October 2026, Asia/Karachi. Shared dashboard/report metrics, exact-state booking filters, multi-page flight totals, recorded route fares and CSV fields are now verified. Loyalty miles and benefits previously inferred from fares are unavailable until backed by a rewards ledger. The suite now contains eight checks and 44 independent regressions, including a 510-flight reconciliation scenario and customer/admin browser checks in two time zones. Local data inspection found valid references, passenger mappings, aircraft capacities and schedules; no flight reseeding was required. Private hosted records have not been inspected.
+Data/report follow-up: 4 October 2026, Asia/Karachi. Shared dashboard/report metrics, exact-state booking filters, multi-page flight totals, recorded route fares and CSV fields are verified. Loyalty miles and benefits previously inferred from fares remain unavailable until backed by a rewards ledger. The earlier eight-check suite passed; 48 independent regressions now pass with additional public-demo isolation and UTC deadline checks. TiDB history-preserving reseeding and actual hosted login/report checks are recorded below. A separate synthetic-data TiDB public demo is prepared and tested for all three roles, with a distinct JWT secret, guarded namespace and unchanged primary record digests. Its Render deployment remains pending access/configuration; a local preview runs on port 3001. Primary admin/crew passwords were not published.
 
 **Release decision: the implemented workflows are suitable for local review and testing; this application is not yet ready to operate a real airline or collect customer payments.** Removing the global banner improves the layout and does not establish that money is collected. Live hosting and payment-provider choices are still unspecified.
 
@@ -24,7 +24,7 @@ Hosted data follow-up (4 October 2026): the TiDB reseed preserved all booking, f
 
 | Check | Result |
 | --- | --- |
-| Independent regression tests (`npm test`) | 44 passed, including schema startup, CSV/chart accuracy and stale-search protection |
+| Independent regression tests (`npm test`) | 48 passed, including schema startup, CSV/chart accuracy, stale-search protection and public-demo/UTC isolation |
 | Dashboard, report, customer and management reconciliation (`test:metrics`) | Passed in disposable MySQL and desktop/mobile Chromium; 510 flight records and two time zones |
 | Fresh/legacy schema, repeat migrations and missing expiry-column recovery | Passed; existing booking preserved |
 | Booking, hold, expiry, rebooking, notification and support workflows | Passed in disposable MySQL |
