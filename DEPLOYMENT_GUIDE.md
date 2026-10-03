@@ -19,6 +19,12 @@ If your plan supports a separate pre-deploy command, use `npm run db:setup` ther
 
 Verify that Render's `DB_HOST`, `DB_PORT` and `DB_NAME` point to the intended database. After deployment, check for `Schema and versioned migrations verified` and `SkyWings server running` in the logs, and a successful `/api/health` response. Production account/payment safeguards still apply; resolve any separate startup error as reported. Do not use `db:reset` or sample seeding to repair a hosted database.
 
+### TiDB generated-column migration error
+
+`Unsupported modify column: oldCol is a dependent column 'status' for generated column` occurs when the seat-hold status upgrade runs while `active_flag` depends on it. The corrected `001_runtime_schema.js` skips current enum definitions, appends missing values without changing existing enum ordinals and recreates the generated column/known unique index when alteration is necessary. It converts historical CONFIRMED holds to CONSUMED, retaining the old enum label for compatibility. Migration retries preserve hold records and restore uniqueness; unexpected custom indexes cause an explicit stop for review. Run upgrades in a controlled window with hold writes paused while the index is rebuilt.
+
+Push the corrected migration and redeploy the latest commit using the same `npm run start:deploy` command. A failed migration is not recorded as applied, so deployment retries it. Logs now name each migration and identify a failing file. Local checks enforce the relevant TiDB restrictions while executing real MySQL DDL, including recovery from an interrupted migration; no live TiDB compatibility test has been performed. [TiDB documents ALTER TABLE compatibility restrictions](https://docs.pingcap.com/tidb/stable/sql-statement-alter-table/).
+
 # 🌐 SkyWings Airlines - Cloud Deployment Guide
 
 This guide details how to deploy the **SkyWings Airlines** enterprise platform:

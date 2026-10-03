@@ -1,6 +1,27 @@
 const fs = require('fs');
 const assert = require('node:assert/strict');
 const setup = require('./databaseSetup');
+// Execute real MySQL DDL/data changes while enforcing the TiDB restrictions reported by Render.
+function withTiDBHoldChecks(connection, interruptBeforeStatusAlter = false) {
+  return {
+    execute: (...args) => connection.execute(...args),
+    query: async (sql, params) => {
+      if (/ALTER TABLE seat_holds MODIFY status/i.test(sql)) {
+        const [columns] = await connection.query('SHOW COLUMNS FROM seat_holds');
+        assert.ok(!columns.some(column => column.Field === 'active_flag' && column.Extra.includes('GENERATED')), 'TiDB cannot modify status while active_flag depends on it');
+        const oldType = columns.find(column => column.Field === 'status').Type;
+        if (oldType.startsWith('enum(')) {
+          const oldValues = [...oldType.matchAll(/'([^']+)'/g)].map(match => match[1]);
+          const newType = sql.match(/ENUM\(([^)]+)\)/i)[1];
+          const newValues = [...newType.matchAll(/'([^']+)'/g)].map(match => match[1]);
+          assert.deepEqual(newValues.slice(0, oldValues.length), oldValues, 'Existing enum ordinals must be preserved');
+        }
+        if (interruptBeforeStatusAlter) throw new Error('Simulated deployment interruption');
+      }
+      return connection.query(sql, params);
+    }
+  };
+}
 async function checkSchema() {
   const connection = await setup.openConnection();
   const names = [`skywings_test_schema_${process.pid}`, `skywings_test_upgrade_${process.pid}`];
@@ -19,9 +40,22 @@ async function checkSchema() {
         await connection.query("INSERT INTO aircraft (model,registration,capacity) VALUES ('Fixture','AP-LEG',1)");
         await connection.query("INSERT INTO flights (flight_number,aircraft_id,from_airport_code,to_airport_code,departure_datetime,arrival_datetime,base_price,business_price,first_class_price) VALUES ('SW-LEG',1,'KHI','ISB',DATE_ADD(NOW(),INTERVAL 1 DAY),DATE_ADD(NOW(),INTERVAL 26 HOUR),100,150,200)");
         await connection.query("INSERT INTO bookings (booking_reference,user_id,flight_id,number_of_passengers,class,total_amount) VALUES ('LEGACY-KEEP',1,1,1,'economy',100)");
+        // A partially applied core migration may already have created this dependent column.
+        await connection.query("ALTER TABLE seat_holds ADD COLUMN active_flag TINYINT GENERATED ALWAYS AS (IF(status = 'HELD',1,NULL)) VIRTUAL");
+        await connection.query('ALTER TABLE seat_holds ADD UNIQUE INDEX uq_flight_seat_active (flight_id,seat_number,active_flag)');
+        await connection.query("INSERT INTO seat_holds (flight_id,seat_number,user_id,session_id,status,expires_at) VALUES (1,'4A',1,'legacy-held','HELD',DATE_ADD(NOW(),INTERVAL 1 HOUR)),(1,'4B',1,'legacy-confirmed','CONFIRMED',DATE_ADD(NOW(),INTERVAL 1 HOUR)),(1,'4C',1,'legacy-expired','HELD',DATE_SUB(NOW(),INTERVAL 1 HOUR))");
+        await assert.rejects(require('../database/migrations/001_runtime_schema')(withTiDBHoldChecks(connection, true)), /Simulated deployment interruption/);
+        const [[interrupted]] = await connection.query('SELECT COUNT(*) AS count FROM seat_holds');
+        assert.equal(interrupted.count, 3, 'A stopped migration must preserve hold records');
+        await require('../database/migrations/001_runtime_schema')(withTiDBHoldChecks(connection));
+        const [holds] = await connection.query('SELECT seat_number,status,active_flag FROM seat_holds ORDER BY hold_id');
+        assert.deepEqual(holds.map(row => [row.seat_number,row.status,row.active_flag]), [['4A','HELD',1],['4B','CONSUMED',null],['4C','EXPIRED',null]]);
+        await assert.rejects(connection.query("INSERT INTO seat_holds (flight_id,seat_number,user_id,session_id,status,expires_at) VALUES (1,'4A',1,'duplicate','HELD',DATE_ADD(NOW(),INTERVAL 1 HOUR))"), error => error.code === 'ER_DUP_ENTRY');
+        console.log('TiDB-style generated-column/enum upgrade passed; holds and unique-seat protection preserved.');
       }
       await setup({ database: name });
       await setup({ database: name });
+      await require('../database/migrations/001_runtime_schema')(withTiDBHoldChecks(connection));
       await require('../backend/services/schemaReadiness').verify(connection);
       if (index === 1) {
         const [[preserved]] = await connection.query("SELECT booking_reference,total_amount,status,reservation_expires_at > NOW() AS deadline_valid FROM bookings WHERE booking_reference = 'LEGACY-KEEP'");

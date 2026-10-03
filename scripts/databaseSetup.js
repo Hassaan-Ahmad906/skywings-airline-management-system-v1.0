@@ -24,7 +24,9 @@ async function setupDatabase(options = {}) {
     for (const file of fs.readdirSync(directory).filter(name => name.endsWith('.js')).sort()) {
       const [rows] = await connection.execute('SELECT version FROM schema_migrations WHERE version = ?', [file]);
       if (rows.length) continue;
-      await require(path.join(directory, file))(connection);
+      console.log(`Applying migration: ${file}`);
+      try { await require(path.join(directory, file))(connection); }
+      catch (error) { error.message = `Migration ${file} failed: ${error.message}`; throw error; }
       await connection.execute('INSERT INTO schema_migrations (version) VALUES (?)', [file]);
     }
     console.log(`Schema and versioned migrations verified: ${name}`);

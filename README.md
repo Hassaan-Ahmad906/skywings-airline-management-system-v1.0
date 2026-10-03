@@ -216,6 +216,8 @@ Read the [enterprise readiness audit](ENTERPRISE_READINESS_AUDIT.md) before plan
 
 For Render, use Build Command `npm ci` and Start Command `npm run start:deploy` to apply database migrations before launching. Alternatively, run `npm run db:setup` in a supported pre-deploy step and start with `npm start`. The server refuses an outdated schema before listening or starting cleanup. See the [Render migration troubleshooting instructions](DEPLOYMENT_GUIDE.md#render-missing-reservation-expiry-column) for the `reservation_expires_at` error. Neither migration path resets or seeds hosted data.
 
+The core migration also handles the seat-hold generated-column dependency reported by TiDB. It skips unnecessary status changes, preserves existing enum order and recreates the generated flag and unique-seat index when an upgrade requires it. Schema tests cover existing hold records, interrupted migration retries and restored duplicate-seat protection on MySQL with TiDB-style checks. A live TiDB deployment still needs verification against its own database version.
+
 | Document | Purpose |
 | --- | --- |
 | [Enterprise readiness audit](ENTERPRISE_READINESS_AUDIT.md) | Release decision, verification evidence and remaining production requirements |
