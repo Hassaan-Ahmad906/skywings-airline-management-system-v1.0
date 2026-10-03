@@ -30,15 +30,16 @@ class SeatRepository {
   /**
    * Verify if seats exist and belong to the specified aircraft
    */
-  async verifySeatsBelongToAircraft(connection, aircraftId, seatNumbers) {
+  async verifySeatsBelongToAircraft(connection, aircraftId, seatNumbers, cabinClass = null) {
     if (!seatNumbers || seatNumbers.length === 0) return [];
     
     const placeholders = seatNumbers.map(() => '?').join(',');
     const [rows] = await connection.execute(
       `SELECT seat_number 
        FROM seats 
-       WHERE aircraft_id = ? AND seat_number IN (${placeholders})`,
-      [aircraftId, ...seatNumbers]
+       WHERE aircraft_id = ? AND seat_number IN (${placeholders}) AND is_available = 1
+         AND (? IS NULL OR seat_class = ?)`,
+      [aircraftId, ...seatNumbers, cabinClass, cabinClass]
     );
 
     const validSeats = new Set(rows.map(r => r.seat_number));
@@ -97,6 +98,15 @@ class SeatRepository {
    */
   async allocateSeat(connection, flightId, seatNumber, bookingId, userId) {
     await this.cleanupExpiredHolds(connection, flightId);
+    const [holds] = await connection.execute(
+      `SELECT user_id FROM seat_holds WHERE flight_id = ? AND seat_number = ?
+       AND status = 'HELD' AND expires_at > NOW() FOR UPDATE`, [flightId, seatNumber]
+    );
+    if (holds.some(hold => hold.user_id !== userId)) {
+      const error = new Error(`Seat ${seatNumber} is held by another passenger.`);
+      error.status = 409; error.code = 'SEAT_UNAVAILABLE'; throw error;
+    }
+    await connection.execute("UPDATE seat_holds SET status = 'CONSUMED' WHERE flight_id = ? AND seat_number = ? AND user_id = ? AND status = 'HELD'", [flightId, seatNumber, userId]);
 
     // Check if user already holds this seat
     const [existing] = await connection.execute(

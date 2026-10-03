@@ -31,3 +31,10 @@ build/
 tmp/
 temp/
 
+.env.example
+
+# Private database backups and browser artifacts
+backups/
+artifacts/
+playwright-report/
+test-results/

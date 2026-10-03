@@ -24,18 +24,20 @@
                 <li><a href="admin-dashboard.html" class="active">Dashboard</a></li>
                 <li><a href="admin-management.html">Management</a></li>
                 <li><a href="admin-reports.html">Reports</a></li>
+                <li><a href="#supportMessagesTitle">Feedback</a></li>
+                <li><a href="crew-portal.html">Gate operations</a></li>
                 <li><a href="index.html" onclick="handleLogout()">Logout</a></li>
             </ul>
-            <div class="hamburger">
+            <button type="button" class="hamburger" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navMenu">
                 <span></span>
                 <span></span>
                 <span></span>
-            </div>
+            </button>
         </div>
     </nav>
 
     <!-- Top Stack 1: Page Header Banner Card -->
-    <div class="page-header" style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95)), url('images/hero-bg.jpg') center/cover; padding: 1rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+    <div class="page-header" style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95)); padding: 1rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
         <div class="container admin-container">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
                 <div>
@@ -148,6 +150,26 @@
 
     </div>
 
+<section class="container ops-panel"><div class="ops-heading"><div><p class="ops-eyebrow">Airport operations</p><h2>Gate boarding</h2><p>Manage gates and monitor passenger boarding. Airport staff have their own dedicated portal.</p></div><a class="btn btn-secondary" href="crew-portal.html">Open crew portal</a></div><div id="gateOperations"></div></section>
+    <section class="container ops-panel" aria-labelledby="supportMessagesTitle">
+        <div class="ops-heading"><div><p class="ops-eyebrow">Customer care</p><h2 id="supportMessagesTitle">Feedback & support inbox</h2><p>Review customer messages, resolve requests, and manage your inbox.</p></div><button type="button" class="btn btn-secondary" onclick="loadContactMessages()">Refresh</button></div>
+        <form id="inboxFilters" class="ops-toolbar" onsubmit="event.preventDefault(); loadContactMessages(1)">
+            <label class="ops-grow">Search messages<input id="inboxQuery" type="search" maxlength="100" placeholder="Name, email or message"></label>
+            <label>Status<select id="inboxStatus" onchange="loadContactMessages(1)"><option value="all">All messages</option><option value="new">New</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option><option value="trash">Trash</option></select></label>
+            <button class="btn btn-primary" type="submit">Search</button>
+        </form>
+        <p id="inboxResult" class="ops-notice" role="status"></p>
+        <div id="adminContactMessages" class="inbox-grid"></div>
+        <div class="ops-pagination"><button type="button" id="inboxPrevious" class="btn btn-secondary">Previous</button><span id="inboxPage"></span><button type="button" id="inboxNext" class="btn btn-secondary">Next</button></div>
+    </section>
+    <link rel="stylesheet" href="css/operations.css">
+    <script src="js/html.js"></script>
+    <script src="js/payments.js"></script>
+    <script src="js/seat-map.js"></script>
+    <script src="js/accessibility.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/support-inbox.js"></script>
+    <script src="js/gate-portal.js"></script>
+<script>document.addEventListener("DOMContentLoaded", () => loadContactMessages());</script>
 </body>
 </html>

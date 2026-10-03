@@ -8,7 +8,7 @@ if (isProduction && (!JWT_SECRET || JWT_SECRET.length < 32)) {
   throw new Error('JWT_SECRET must be set to a random value of at least 32 characters in production.');
 }
 
-const signingSecret = JWT_SECRET || 'development-only-secret-do-not-use-in-production';
+const signingSecret = JWT_SECRET || require('crypto').randomBytes(48).toString('hex');
 
 // Middleware to verify JWT token
 async function authenticate(req, res, next) {
@@ -35,11 +35,11 @@ async function authenticate(req, res, next) {
       
       // Get user from database to ensure they still exist and are active
       const user = await queryOne(
-        'SELECT user_id, email, role, status FROM users WHERE user_id = ? AND status = ?',
+        'SELECT user_id, email, role, status, token_version, gate_airport_code FROM users WHERE user_id = ? AND status = ?',
         [decoded.userId, 'active']
       );
 
-      if (!user) {
+      if (!user || Number(decoded.tokenVersion || 0) !== Number(user.token_version || 0)) {
         return res.status(401).json({
           success: false,
           message: 'Unauthorized: User not found or inactive'
@@ -49,7 +49,8 @@ async function authenticate(req, res, next) {
       req.user = {
         userId: user.user_id,
         email: user.email,
-        role: user.role
+        role: user.role,
+        gate_airport_code: user.gate_airport_code
       };
       
       next();
@@ -79,17 +80,25 @@ function requireAdmin(req, res, next) {
 }
 
 // Generate JWT token
-function generateToken(userId, email, role) {
+function generateToken(userId, email, role, tokenVersion = 0) {
   return jwt.sign(
-    { userId, email, role },
+    { userId, email, role, tokenVersion },
     signingSecret,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 }
 
+function requireGateStaff(req, res, next) {
+  if (!req.user || !['admin','crew'].includes(req.user.role) || (req.user.role === 'crew' && !req.user.gate_airport_code)) {
+    return res.status(403).json({ success: false, message: 'Airport gate staff access required' });
+  }
+  next();
+}
+
 module.exports = {
   authenticate,
   requireAdmin,
+  requireGateStaff,
   generateToken,
   signingSecret
 };

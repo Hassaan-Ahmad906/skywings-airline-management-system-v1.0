@@ -3,96 +3,15 @@ const { body, validationResult } = require('express-validator');
 const { query, queryOne } = require('../config/database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // All admin routes require authentication and admin role
 router.use(authenticate);
 router.use(requireAdmin);
 
-async function syncFlightAndBookingStatuses() {
-  try {
-    // 1. Auto-complete flights that arrived cleanly before now
-    await query(`
-      UPDATE flights SET status = 'completed' 
-      WHERE LOWER(status) IN ('scheduled', 'in_air', 'boarding') AND arrival_datetime <= CURRENT_TIMESTAMP
-    `);
-
-    // 2. Auto-cancel flights that are > 24 hours past departure datetime and still not completed
-    await query(`
-      UPDATE flights SET status = 'cancelled' 
-      WHERE LOWER(status) IN ('scheduled', 'delayed', 'in_air') 
-        AND departure_datetime < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 24 HOUR)
-    `);
-
-    // 3. Cascade flight cancellation to linked active bookings and refund passenger amounts
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'CANCELLED',
-          b.payment_status = 'refunded',
-          b.state_change_reason = 'Flight Auto-Cancelled (Unfulfilled >24h Past Departure)',
-          b.cancelled_at = CURRENT_TIMESTAMP
-      WHERE LOWER(f.status) = 'cancelled' AND LOWER(b.status) IN ('confirmed', 'pending', 'checked_in')
-    `);
-
-    // 4. Update linked ticket statuses
-    await query(`
-      UPDATE tickets t
-      JOIN bookings b ON t.booking_id = b.booking_id
-      SET t.status = 'CANCELLED'
-      WHERE LOWER(b.status) = 'cancelled' AND LOWER(t.status) != 'cancelled'
-    `);
-
-    // 5. Release seat allocations for auto-cancelled bookings
-    await query(`
-      DELETE fsa FROM flight_seat_allocations fsa
-      JOIN bookings b ON fsa.booking_id = b.booking_id
-      WHERE LOWER(b.status) = 'cancelled'
-    `);
-
-    // 6. Synchronize past flight booking statuses (BOARDED vs MISSED)
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'BOARDED'
-      WHERE f.departure_datetime <= CURRENT_TIMESTAMP
-        AND LOWER(b.status) IN ('confirmed', 'completed', 'checked_in')
-        AND EXISTS (
-          SELECT 1 FROM booking_passengers bp 
-          WHERE bp.booking_id = b.booking_id AND bp.seat_number IS NOT NULL AND bp.seat_number != ''
-        )
-    `);
-
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'MISSED',
-          b.state_change_reason = 'Passenger Missed Flight (No Check-in / No Show)'
-      WHERE f.departure_datetime <= CURRENT_TIMESTAMP
-        AND LOWER(b.status) IN ('confirmed', 'completed')
-        AND NOT EXISTS (
-          SELECT 1 FROM booking_passengers bp 
-          WHERE bp.booking_id = b.booking_id AND bp.seat_number IS NOT NULL AND bp.seat_number != ''
-        )
-    `);
-
-    // 7. Expire unpaid pending bookings whose flight departure datetime has passed
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'EXPIRED',
-          b.state_change_reason = 'Payment Window Expired Prior to Departure'
-      WHERE LOWER(b.status) = 'pending' AND f.departure_datetime <= CURRENT_TIMESTAMP
-    `);
-  } catch (syncErr) {
-    console.warn('Flight status auto-sync warning:', syncErr.message);
-  }
-}
-
 // ========== STATISTICS ==========
 router.get('/stats', async (req, res) => {
   try {
-    await syncFlightAndBookingStatuses();
 
     const [totalUsers] = await query('SELECT COUNT(*) as total FROM users WHERE role = "user"');
     const [totalFlights] = await query('SELECT COUNT(*) as total FROM flights');
@@ -137,7 +56,6 @@ router.get('/stats', async (req, res) => {
 router.get('/flights', async (req, res) => {
   try {
     console.log('Admin flights request:', { page: req.query.page, limit: req.query.limit, search: req.query.search });
-    await syncFlightAndBookingStatuses();
 
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200)); // Max 500
@@ -244,253 +162,18 @@ router.get('/flights', async (req, res) => {
 // Create new flight
 router.post('/flights', async (req, res) => {
   try {
-    const {
-      flight_number,
-      aircraft_id,
-      from_airport_code,
-      to_airport_code,
-      departure_datetime,
-      arrival_datetime,
-      base_price,
-      business_price,
-      first_class_price,
-      status = 'scheduled'
-    } = req.body;
-
-    // Validate required fields
-    if (!flight_number || !aircraft_id || !from_airport_code || !to_airport_code || 
-        !departure_datetime || !arrival_datetime || base_price === undefined || base_price === null) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price'
-      });
-    }
-
-    // Check if flight number already exists
-    const existing = await queryOne(
-      'SELECT flight_id FROM flights WHERE flight_number = ?',
-      [flight_number]
-    );
-
-    if (existing) {
-      return res.status(409).json({
-        success: false,
-        message: 'Flight number already exists'
-      });
-    }
-
-    // Validate dates
-    const departure = new Date(departure_datetime);
-    const arrival = new Date(arrival_datetime);
-
-    if (isNaN(departure.getTime()) || isNaN(arrival.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid date format'
-      });
-    }
-
-    if (arrival <= departure) {
-      return res.status(400).json({
-        success: false,
-        message: 'Arrival time must be after departure time'
-      });
-    }
-
-    // Calculate prices if not provided
-    const calculatedBusinessPrice = business_price || (parseFloat(base_price) * 1.5);
-    const calculatedFirstClassPrice = first_class_price || (parseFloat(base_price) * 2);
-
-    // Insert flight
-    const [result] = await require('../config/database').pool.execute(
-      `INSERT INTO flights (
-        flight_number, aircraft_id, from_airport_code, to_airport_code,
-        departure_datetime, arrival_datetime, base_price, business_price, 
-        first_class_price, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        flight_number,
-        parseInt(aircraft_id),
-        from_airport_code,
-        to_airport_code,
-        departure_datetime,
-        arrival_datetime,
-        parseFloat(base_price),
-        parseFloat(calculatedBusinessPrice),
-        parseFloat(calculatedFirstClassPrice),
-        status
-      ]
-    );
-
-    res.status(201).json({
-      success: true,
-      message: 'Flight created successfully',
-      data: { flight_id: result.insertId }
-    });
-  } catch (error) {
-    console.error('Create flight error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create flight: ' + error.message
-    });
-  }
+    const flightId = await require('../services/flightManagementService').createFlight(req.body);
+    res.status(201).json({ success: true, message: 'Flight created', data: { flight_id: flightId } });
+  } catch (error) { res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Flight creation failed' }); }
 });
 
 // Update flight
 router.put('/flights/:id', async (req, res) => {
   try {
-    const flightId = parseInt(req.params.id);
-    
-    if (isNaN(flightId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid flight ID'
-      });
-    }
-
-    // Check if flight exists
-    const flight = await queryOne('SELECT flight_id FROM flights WHERE flight_id = ?', [flightId]);
-    if (!flight) {
-      return res.status(404).json({
-        success: false,
-        message: 'Flight not found'
-      });
-    }
-
-    const {
-      flight_number,
-      aircraft_id,
-      from_airport_code,
-      to_airport_code,
-      departure_datetime,
-      arrival_datetime,
-      base_price,
-      business_price,
-      first_class_price,
-      status
-    } = req.body;
-
-    // Build update query dynamically
-    const updates = [];
-    const params = [];
-
-    if (flight_number) {
-      // Check if new flight number conflicts with another flight
-      const conflict = await queryOne(
-        'SELECT flight_id FROM flights WHERE flight_number = ? AND flight_id != ?',
-        [flight_number, flightId]
-      );
-      if (conflict) {
-        return res.status(409).json({
-          success: false,
-          message: 'Flight number already exists'
-        });
-      }
-      updates.push('flight_number = ?');
-      params.push(flight_number);
-    }
-
-    if (aircraft_id) {
-      updates.push('aircraft_id = ?');
-      params.push(parseInt(aircraft_id));
-    }
-
-    if (from_airport_code) {
-      updates.push('from_airport_code = ?');
-      params.push(from_airport_code);
-    }
-
-    if (to_airport_code) {
-      updates.push('to_airport_code = ?');
-      params.push(to_airport_code);
-    }
-
-    if (departure_datetime) {
-      updates.push('departure_datetime = ?');
-      params.push(departure_datetime);
-    }
-
-    if (arrival_datetime) {
-      updates.push('arrival_datetime = ?');
-      params.push(arrival_datetime);
-    }
-
-    if (base_price !== undefined && base_price !== null) {
-      updates.push('base_price = ?');
-      params.push(parseFloat(base_price));
-    }
-
-    if (business_price !== undefined && business_price !== null) {
-      updates.push('business_price = ?');
-      params.push(parseFloat(business_price));
-    }
-
-    if (first_class_price !== undefined && first_class_price !== null) {
-      updates.push('first_class_price = ?');
-      params.push(parseFloat(first_class_price));
-    }
-
-    if (status) {
-      updates.push('status = ?');
-      params.push(status);
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No fields to update'
-      });
-    }
-
-    // Validate dates if both are being updated
-    if (departure_datetime && arrival_datetime) {
-      const dep = new Date(departure_datetime);
-      const arr = new Date(arrival_datetime);
-      if (arr <= dep) {
-        return res.status(400).json({
-          success: false,
-          message: 'Arrival time must be after departure time'
-        });
-      }
-    }
-
-    params.push(flightId);
-
-    await query(
-      `UPDATE flights SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE flight_id = ?`,
-      params
-    );
-
-    // If flight status was set to cancelled, cascade cancellation to all active bookings & refund passengers
-    if (status && status.toLowerCase() === 'cancelled') {
-      try {
-        await query(
-          `UPDATE bookings SET status = 'CANCELLED', payment_status = 'refunded', state_change_reason = 'Flight Cancelled by Airline', cancelled_at = CURRENT_TIMESTAMP WHERE flight_id = ? AND LOWER(status) IN ('confirmed', 'pending', 'checked_in')`,
-          [flightId]
-        );
-        await query(
-          `UPDATE tickets SET status = 'CANCELLED' WHERE booking_id IN (SELECT booking_id FROM bookings WHERE flight_id = ?)`,
-          [flightId]
-        );
-        await query(
-          `DELETE FROM flight_seat_allocations WHERE flight_id = ?`,
-          [flightId]
-        );
-      } catch (cascadeErr) {
-        console.warn('Flight cancellation cascading warning:', cascadeErr.message);
-      }
-    }
-
-    res.json({
-      success: true,
-      message: 'Flight updated successfully'
-    });
+    await require('../services/flightManagementService').updateFlight(Number(req.params.id), req.body, req.user);
+    res.json({ success: true, message: 'Flight updated successfully' });
   } catch (error) {
-    console.error('Update flight error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update flight: ' + error.message
-    });
+    res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Flight update failed; changes rolled back' });
   }
 });
 
@@ -627,18 +310,6 @@ router.get('/bookings', async (req, res) => {
   try {
     const { status } = req.query;
 
-    // Synchronize stale booking statuses in database
-    try {
-      await query(`
-        UPDATE bookings b
-        JOIN flights f ON b.flight_id = f.flight_id
-        SET b.status = 'EXPIRED', b.expired_at = CURRENT_TIMESTAMP
-        WHERE LOWER(b.status) = 'pending' AND f.departure_datetime < CURRENT_TIMESTAMP
-      `);
-    } catch (syncErr) {
-      console.warn('Auto status sync warning:', syncErr.message);
-    }
-
     let sql = `
       SELECT 
         b.booking_id,
@@ -652,6 +323,8 @@ router.get('/bookings', async (req, res) => {
         b.status,
         b.payment_status,
         b.payment_method,
+        b.refund_status,
+        b.reservation_expires_at,
         b.created_at,
         b.updated_at,
         u.first_name as user_first_name,
@@ -712,73 +385,17 @@ router.get('/bookings', async (req, res) => {
 // ========== BOOKINGS MANAGEMENT ==========
 
 // Update booking status
-router.put('/bookings/:id/status', [
-  body('status')
-    .isIn(['pending', 'confirmed', 'cancelled', 'completed']).withMessage('Invalid status'),
-  body('payment_status')
-    .optional()
-    .isIn(['pending', 'paid', 'refunded']).withMessage('Invalid payment status')
-], async (req, res) => {
+router.put('/bookings/:id/status', async (req, res) => {
+  if (String(req.body.status).toUpperCase() !== 'CANCELLED' || req.body.payment_status !== undefined) {
+    return res.status(403).json({ success: false, message: 'Use dedicated payment, check-in, boarding, or rebooking actions.' });
+  }
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
-    const bookingId = parseInt(req.params.id);
-    const { status, payment_status } = req.body;
-
-    if (isNaN(bookingId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid booking ID'
-      });
-    }
-
-    // Check if booking exists
-    const booking = await queryOne('SELECT booking_id FROM bookings WHERE booking_id = ?', [bookingId]);
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
-    }
-
-    const updates = ['status = ?'];
-    const params = [status];
-
-    if (status && status.toLowerCase() === 'confirmed') {
-      updates.push("state_change_reason = 'Rebooked & Confirmed by Admin'");
-    } else if (status && status.toLowerCase() === 'cancelled') {
-      updates.push("state_change_reason = 'Cancelled by Admin'");
-    }
-
-    if (payment_status) {
-      updates.push('payment_status = ?');
-      params.push(payment_status);
-    }
-
-    params.push(bookingId);
-
-    await query(
-      `UPDATE bookings SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE booking_id = ?`,
-      params
-    );
-
-    res.json({
-      success: true,
-      message: 'Booking status updated successfully'
-    });
+    const owner = await queryOne('SELECT user_id FROM bookings WHERE booking_id = ?', [Number(req.params.id)]);
+    if (!owner) return res.status(404).json({ success: false, message: 'Booking not found' });
+    await require('../services/bookingService').cancelBooking(owner.user_id, Number(req.params.id), { requestingUser: req.user, reason: 'Cancelled by administrator', allowOverride: true });
+    res.json({ success: true, message: 'Booking cancelled; any real refund requires provider processing' });
   } catch (error) {
-    console.error('Update booking status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update booking status: ' + error.message
-    });
+    res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Cancellation failed' });
   }
 });
 

@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const seatHoldController = require('../controllers/seatHoldController');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // All seat hold endpoints require JWT authentication
 router.use(authenticate);

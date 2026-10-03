@@ -4,7 +4,7 @@ class SeatHoldController {
   async createOrChangeHold(req, res) {
     try {
       const userId = req.user.userId;
-      const { flight_id, seat_number, session_id, passenger_index = 0 } = req.body;
+      const { flight_id, seat_number, session_id, passenger_index = 0, booking_id = null } = req.body;
 
       if (!flight_id || !seat_number || !session_id) {
         return res.status(400).json({
@@ -20,7 +20,8 @@ class SeatHoldController {
         flight_id,
         seat_number,
         session_id,
-        passenger_index
+        passenger_index,
+        booking_id
       });
 
       res.status(201).json({

@@ -11,7 +11,8 @@ const BOOKING_STATES = {
   BOARDED: 'BOARDED',
   COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
-  EXPIRED: 'EXPIRED'
+  EXPIRED: 'EXPIRED',
+  MISSED: 'MISSED'
 };
 
 class BookingStateMachine {
@@ -32,7 +33,7 @@ class BookingStateMachine {
     const isRebookingReactivation = current === 'CANCELLED' && target === 'CONFIRMED' && options.allowReactivation === true && options.operation === 'REBOOKING';
 
     // Terminal State Protection: COMPLETED, EXPIRED, and un-authorized CANCELLED cannot transition out
-    if (['COMPLETED', 'EXPIRED'].includes(current) || (current === 'CANCELLED' && !isRebookingReactivation)) {
+    if (['COMPLETED', 'EXPIRED', 'MISSED'].includes(current) || (current === 'CANCELLED' && !isRebookingReactivation)) {
       const error = new Error(`Cannot transition out of terminal booking state ${current}.`);
       error.code = 'TERMINAL_STATE_LOCKED';
       error.status = 400;
@@ -48,9 +49,13 @@ class BookingStateMachine {
     } else if (current === 'PENDING' && target === 'CONFIRMED') {
       // PENDING -> CONFIRMED (System/Booking Service ONLY)
       isAllowed = ['SYSTEM', 'BOOKING_SERVICE', 'ADMIN'].includes(actorType);
+    } else if (current === 'CHECKED_IN' && target === 'CONFIRMED' && options.allowCheckInReset === true && ['REBOOKING','DISRUPTION'].includes(options.operation)) {
+      isAllowed = ['USER','ADMIN','SYSTEM'].includes(actorType);
     } else if (current === 'PENDING' && target === 'EXPIRED') {
       // PENDING -> EXPIRED (System/Cleaner ONLY)
       isAllowed = ['SYSTEM', 'CLEANER', 'ADMIN'].includes(actorType);
+    } else if (['CONFIRMED', 'CHECKED_IN'].includes(current) && target === 'MISSED') {
+      isAllowed = ['SYSTEM', 'CLEANER'].includes(actorType);
     } else if (current === 'PENDING' && target === 'CANCELLED') {
       // PENDING -> CANCELLED (Customer/Admin)
       isAllowed = ['USER', 'ADMIN', 'SYSTEM'].includes(actorType);
@@ -134,7 +139,10 @@ class BookingStateMachine {
     const updateParams = [target, defaultReason];
 
     if (target === 'CANCELLED') {
-      updateSql += `, payment_status = 'refunded'`;
+      // A cancellation is not evidence that a payment provider returned money.
+      updateSql += `, refund_status = CASE WHEN payment_status = 'paid' AND payment_method = 'Demo' THEN 'completed'
+        WHEN payment_status = 'paid' THEN 'pending' ELSE refund_status END,
+        payment_status = CASE WHEN payment_status = 'paid' AND payment_method = 'Demo' THEN 'refunded' ELSE payment_status END`;
     }
 
     if (timestampCol) {
@@ -163,7 +171,7 @@ class BookingStateMachine {
           );
         }
       }
-    } else if (target === 'CANCELLED') {
+    } else if (['CANCELLED', 'EXPIRED', 'MISSED'].includes(target)) {
       // CANCELLED -> Ticket CANCELLED
       for (const t of bookingTickets) {
         if (t.status !== 'CANCELLED') {
@@ -180,6 +188,8 @@ class BookingStateMachine {
       }
       // Release physical seats & active holds
       await seatAllocationService.releaseSeats(connection, bookingId);
+      await connection.execute("UPDATE check_ins SET status = 'cancelled', boarding_token = NULL WHERE booking_id = ?", [bookingId]);
+      await connection.execute('UPDATE booking_passengers SET boarding_token = NULL WHERE booking_id = ?', [bookingId]);
     }
 
     // 6. Record Audit Log

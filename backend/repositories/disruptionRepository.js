@@ -150,7 +150,7 @@ class DisruptionRepository {
        INNER JOIN users u ON b.user_id = u.user_id
        INNER JOIN flights f ON fd.flight_id = f.flight_id
        WHERE ap.notification_status = 'PENDING' OR (ap.notification_status = 'FAILED' AND ap.notification_attempts < 3)
-       LIMIT ${parseInt(limit, 10)}`
+       LIMIT ${Math.min(100, Math.max(1, parseInt(limit, 10) || 20))}`
     );
     return rows;
   }

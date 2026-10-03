@@ -18,7 +18,7 @@ class DisruptionPolicy {
   validatePolicy(disruptionType, flight, payload = {}) {
     const type = disruptionType ? disruptionType.toUpperCase() : null;
 
-    if (!Object.values(DISRUPTION_TYPES).includes(type)) {
+    if (!['DELAY','CANCELLATION','AIRCRAFT_CHANGE','SCHEDULE_CHANGE'].includes(type)) {
       const error = new Error(`Unsupported disruption type [${disruptionType}].`);
       error.code = 'INVALID_DISRUPTION_TYPE';
       error.status = 400;
@@ -42,7 +42,7 @@ class DisruptionPolicy {
 
       const dep = new Date(payload.new_departure_datetime);
       const arr = new Date(payload.new_arrival_datetime);
-      if (arr <= dep) {
+      if (!Number.isFinite(dep.getTime()) || !Number.isFinite(arr.getTime()) || dep <= new Date() || arr <= dep) {
         const error = new Error('New arrival datetime must be strictly after new departure datetime.');
         error.code = 'INVALID_SCHEDULE_TIMING';
         error.status = 400;

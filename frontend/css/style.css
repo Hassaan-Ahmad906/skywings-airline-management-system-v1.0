@@ -11021,3 +11021,18 @@ table tr:hover td {
 
 
 
+
+button.hamburger { border: 0; color: inherit; font: inherit; }
+button.date-chip { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid #38bdf8; outline-offset: 3px; }
+button.seat { font: inherit; padding: 0; }
+.contact-message { padding: 1rem; border-bottom: 1px solid #334155; overflow-wrap: anywhere; }
+
+.profile-container { grid-template-columns: 280px minmax(0, 1fr); }
+.profile-container > *, .section-card-header > * { min-width: 0; }
+.profile-nav { min-width: 0; max-width: 100%; }
+.profile-hero-email, .profile-avatar p { overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+    .profile-container { grid-template-columns: minmax(0, 1fr); }
+    .profile-sidebar, .profile-content { min-width: 0; width: 100%; max-width: 100%; }
+}

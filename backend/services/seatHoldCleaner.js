@@ -36,6 +36,9 @@ class SeatHoldCleaner {
     try {
       connection = await db.pool.getConnection();
       await seatHoldRepository.cleanupExpiredHolds(connection);
+      connection.release();
+      connection = null;
+      await require('./lifecycleService').runSweep();
     } catch (err) {
       console.error('SeatHoldCleaner background cleanup error:', err.message);
     } finally {

@@ -4,18 +4,14 @@ class RebookingRepository {
   /**
    * Search operational alternative candidate flights for a route matching passenger count
    */
-  async getAlternativeFlights(connection, currentFlightId, fromCode, toCode, passengerCount = 1) {
+  async getAlternativeFlights(connection, currentFlightId, fromCode, toCode, passengerCount = 1, cabin = 'economy') {
     const dbExec = connection || db.pool;
     const [rows] = await dbExec.execute(
       `SELECT f.flight_id, f.flight_number, f.departure_datetime, f.arrival_datetime, f.status,
               f.base_price, f.business_price, f.first_class_price,
               a.aircraft_id, a.model as aircraft_model, a.capacity,
               dep.city as from_city, arr.city as to_city,
-              (a.capacity - (
-                SELECT COUNT(*) FROM booking_passengers bp
-                INNER JOIN bookings b ON bp.booking_id = b.booking_id
-                WHERE b.flight_id = f.flight_id AND b.status IN ('CONFIRMED', 'CHECKED_IN', 'confirmed')
-              )) as available_seats
+              ${require('./inventorySql')} as available_seats
        FROM flights f
        INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
@@ -26,7 +22,7 @@ class RebookingRepository {
          AND f.departure_datetime > NOW()
        HAVING available_seats >= ?
        ORDER BY f.departure_datetime ASC`,
-      [fromCode, toCode, currentFlightId, parseInt(passengerCount, 10)]
+      [cabin, cabin, cabin, fromCode, toCode, currentFlightId, Number(passengerCount)]
     );
 
     return rows;

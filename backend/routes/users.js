@@ -4,7 +4,7 @@ const { body, validationResult } = require('express-validator');
 const { query, queryOne } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // All user routes require authentication
 router.use(authenticate);
@@ -230,13 +230,14 @@ router.put('/password', [
 
     // Update password
     await query(
-      'UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
+      'UPDATE users SET password = ?, token_version = token_version + 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
       [hashedPassword, req.user.userId]
     );
 
+    res.clearCookie('authToken', { path: '/' });
     res.json({
       success: true,
-      message: 'Password changed successfully'
+      message: 'Password changed. Please sign in again.'
     });
   } catch (error) {
     console.error('Change password error:', error);

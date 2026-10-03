@@ -4,14 +4,13 @@ const { URL } = require('url');
 const bookingRepository = require('../repositories/bookingRepository');
 const auditService = require('./auditService');
 
-const PRODUCTION_WEBHOOK_URL = 'https://hassaanahmad2.app.n8n.cloud/webhook/c1c5404e-9aa6-4f33-b58e-8de402b5403c';
-
 class EmailWebhookService {
   /**
-   * Get configured webhook URL (with fallback to production n8n webhook)
+   * External delivery is opt-in and has no production fallback.
    */
   getWebhookUrl() {
-    return process.env.N8N_EMAIL_WEBHOOK_URL || PRODUCTION_WEBHOOK_URL;
+    if (process.env.NOTIFICATIONS_ENABLED !== 'true' || process.env.NODE_ENV === 'test') return null;
+    return process.env.N8N_BOOKING_EMAIL_WEBHOOK_URL || null;
   }
 
   /**
@@ -234,6 +233,8 @@ class EmailWebhookService {
    */
   async triggerPaymentConfirmationWebhook(bookingId, connection = null) {
     try {
+      const webhookUrl = this.getWebhookUrl();
+      if (!webhookUrl) return { success: false, reason: 'DELIVERY_DISABLED' };
       if (!bookingId) {
         console.warn('⚠️ [EmailWebhookService] triggerPaymentConfirmationWebhook called without bookingId');
         return { success: false, reason: 'MISSING_BOOKING_ID' };
@@ -249,16 +250,14 @@ class EmailWebhookService {
       // Only trigger if payment is confirmed
       const paymentStatus = (booking.payment_status || '').toLowerCase();
       const bookingStatus = (booking.status || '').toUpperCase();
-      if (paymentStatus !== 'paid' && bookingStatus !== 'CONFIRMED') {
+      if (paymentStatus !== 'paid' || bookingStatus !== 'CONFIRMED' || booking.payment_method === 'Demo') {
         console.warn(`⚠️ [EmailWebhookService] Skipping webhook for booking ${booking.booking_reference}: status=${bookingStatus}, payment_status=${paymentStatus}`);
         return { success: false, reason: 'PAYMENT_NOT_CONFIRMED' };
       }
 
       // Build target payload
       const payload = this.buildPayload(booking);
-      const webhookUrl = this.getWebhookUrl();
-
-      console.log(`📤 [EmailWebhookService] Dispatching payment confirmation email webhook for PNR ${booking.booking_reference} to: ${webhookUrl}`);
+      console.log('[EmailWebhookService] Dispatching configured booking notification');
 
       const result = await this.postJson(webhookUrl, payload);
       console.log(`✅ [EmailWebhookService] n8n Webhook successfully accepted confirmation for PNR ${booking.booking_reference} (HTTP ${result.statusCode})`);

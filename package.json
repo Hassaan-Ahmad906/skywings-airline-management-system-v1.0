@@ -5,11 +5,18 @@
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
+    "dev": "node --watch backend/server.js",
     "test": "node scripts/master_test.js",
     "db:setup": "node scripts/setup_database.js",
     "db:seed": "node scripts/seed_database.js",
-    "db:reset": "node scripts/reset_database.js"
+    "db:reset": "node scripts/reset_database.js",
+    "test:schema": "node scripts/check_schema.js",
+    "test:ui": "node scripts/check_ui_accessibility.js",
+    "test:workflows": "node scripts/check_workflows.js",
+    "test:seed": "node scripts/check_seed.js",
+    "test:browser": "node scripts/check_browser_workflows.js",
+    "test:enterprise": "node scripts/check_enterprise_workflows.js",
+    "test:all": "node scripts/check_all.js"
   },
   "keywords": [
     "airlines",
@@ -26,9 +33,11 @@
     "express": "^4.18.2",
     "express-validator": "^7.0.1",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.6.5"
+    "mysql2": "^3.6.5",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "@playwright/test": "^1.63.0",
+    "acorn": "^8.18.0"
   }
 }

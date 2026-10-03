@@ -36,7 +36,8 @@ class RebookingService {
       booking.flight_id,
       booking.from_airport_code,
       booking.to_airport_code,
-      booking.number_of_passengers
+      booking.number_of_passengers,
+      booking.class
     );
 
     return {
@@ -114,15 +115,14 @@ class RebookingService {
    * Executes flight rebooking with deterministic lock ordering and atomic seat/ticket updates
    */
   async executeRebooking(connection, bookingId, newFlightId, newSeatMappings = [], reason = 'CUSTOMER_REQUEST', requestingUser, rebookingKey = null) {
-    // 1. Idempotency Check
-    if (rebookingKey) {
-      const existing = await rebookingRepository.findByRebookingKey(connection, rebookingKey);
-      if (existing) {
-        return { rebooking: existing, isDuplicateExecution: true };
-      }
-    }
-
-    // 2. LOCK BOOKING FOR UPDATE
+    const [metadata] = await connection.execute('SELECT * FROM bookings WHERE booking_id = ?', [bookingId]);
+    if (!metadata.length) throw Object.assign(new Error('Booking not found'), { status: 404 });
+    rebookingPolicy.validateBookingEligibility(metadata[0], reason, requestingUser);
+    if (!Array.isArray(newSeatMappings) || (newSeatMappings.length && newSeatMappings.length !== metadata[0].number_of_passengers)) throw Object.assign(new Error('Provide one seat for each passenger or omit all seat choices'), { status: 400 });
+    const seats = newSeatMappings.map(value => typeof value === 'object' ? value?.seat_number : value);
+    if (seats.some(value => typeof value !== 'string' || !/^\d{1,3}[A-Z]$/i.test(value)) || new Set(seats.map(value => value.toUpperCase())).size !== seats.length) throw Object.assign(new Error('Invalid or duplicate seats'), { status: 400 });
+    for (const id of [...new Set([metadata[0].flight_id, newFlightId])].sort((a, b) => a - b)) await connection.execute('SELECT flight_id FROM flights WHERE flight_id = ? FOR UPDATE', [id]);
+    // Lock and revalidate the booking after deterministic flight locks.
     const [bookingRows] = await connection.execute(
       `SELECT * FROM bookings WHERE booking_id = ? FOR UPDATE`,
       [bookingId]
@@ -138,25 +138,42 @@ class RebookingService {
     const booking = bookingRows[0];
     const oldFlightId = booking.flight_id;
 
-    // 3. DETERMINISTIC ASCENDING FLIGHT LOCK ORDERING (MIN flight_id -> MAX flight_id)
-    const minFlightId = Math.min(oldFlightId, newFlightId);
-    const maxFlightId = Math.max(oldFlightId, newFlightId);
+    // Authorize before returning any idempotent result or locking other flights.
+    rebookingPolicy.validateBookingEligibility(booking, reason, requestingUser);
+    if (rebookingKey) {
+      const existing = await rebookingRepository.findByRebookingKey(connection, rebookingKey);
+      if (existing) {
+        if (existing.booking_id !== bookingId) {
+          const error = new Error('Rebooking key is already used for another booking.');
+          error.status = 409;
+          error.code = 'REBOOKING_KEY_CONFLICT';
+          throw error;
+        }
+        return { rebooking: existing, isDuplicateExecution: true };
+      }
+    }
 
-    const [fMin] = await connection.execute(`SELECT * FROM flights WHERE flight_id = ? FOR UPDATE`, [minFlightId]);
-    const [fMax] = await connection.execute(`SELECT * FROM flights WHERE flight_id = ? FOR UPDATE`, [maxFlightId]);
-
-    const targetFlight = oldFlightId === minFlightId ? fMax[0] : fMin[0];
+    if (oldFlightId !== metadata[0].flight_id) throw Object.assign(new Error('Booking changed during rebooking. Please retry.'), { status: 409 });
+    const [oldFlights] = await connection.execute('SELECT * FROM flights WHERE flight_id = ?', [oldFlightId]);
+    const [targets] = await connection.execute('SELECT * FROM flights WHERE flight_id = ?', [newFlightId]);
+    const targetFlight = targets[0];
+    booking.from_airport_code = oldFlights[0].from_airport_code;
+    booking.to_airport_code = oldFlights[0].to_airport_code;
+    if (booking.status !== 'CANCELLED' && new Date(oldFlights[0].departure_datetime) <= new Date()) throw Object.assign(new Error('Rebooking is closed after departure'), { status: 409 });
 
     // 4. REVALIDATE EVERYTHING INSIDE ACTIVE TRANSACTION
     rebookingPolicy.validateBookingEligibility(booking, reason, requestingUser);
     rebookingPolicy.validateTargetFlight(booking, targetFlight);
+    const [aircraft] = await connection.execute('SELECT capacity FROM aircraft WHERE aircraft_id = ?', [targetFlight.aircraft_id]);
+    targetFlight.capacity = aircraft[0]?.capacity || 0;
+    await require('../repositories/bookingRepository').assertCapacity(connection, targetFlight, booking.class, booking.number_of_passengers, null, seats.map(seat => seat.toUpperCase()));
 
     // Fetch passenger records
     const [passengers] = await connection.execute(
       `SELECT bp.booking_passenger_id, bp.passenger_id, bp.seat_number, p.first_name, p.last_name
        FROM booking_passengers bp
        INNER JOIN passengers p ON bp.passenger_id = p.passenger_id
-       WHERE bp.booking_id = ? FOR UPDATE`,
+       WHERE bp.booking_id = ? ORDER BY bp.booking_passenger_id FOR UPDATE`,
       [bookingId]
     );
 
@@ -180,7 +197,7 @@ class RebookingService {
     // 5. ATOMIC SEAT ALLOCATION ON NEW FLIGHT
     const newSeatNumbersOnly = newSeatsJson.map(s => s.seat_number).filter(Boolean);
     if (newSeatNumbersOnly.length > 0) {
-      const invalidSeats = await seatRepository.verifySeatsBelongToAircraft(connection, targetFlight.aircraft_id, newSeatNumbersOnly);
+      const invalidSeats = await seatRepository.verifySeatsBelongToAircraft(connection, targetFlight.aircraft_id, newSeatNumbersOnly, booking.class);
       if (invalidSeats.length > 0) {
         const error = new Error(`Seat(s) ${invalidSeats.join(', ')} do not exist on new aircraft.`);
         error.code = 'INVALID_SEAT';
@@ -213,14 +230,17 @@ class RebookingService {
       [newFlightId, bookingId]
     );
 
+    await connection.execute('DELETE FROM check_ins WHERE booking_id = ?', [bookingId]);
+    await connection.execute('UPDATE booking_passengers SET boarding_token = NULL, boarded_at = NULL WHERE booking_id = ?', [bookingId]);
+    await connection.execute("UPDATE bookings SET refund_status = 'none', checked_in_at = NULL WHERE booking_id = ?", [bookingId]);
+
     // Update passenger seat assignments and tickets
     for (const ns of newSeatsJson) {
-      if (ns.seat_number) {
-        await connection.execute(
+      await connection.execute(
           `UPDATE booking_passengers SET seat_number = ? WHERE booking_id = ? AND passenger_id = ?`,
           [ns.seat_number, bookingId, ns.passenger_id]
         );
-
+      if (ns.seat_number) {
         // Record physical seat allocation for new flight
         await seatRepository.allocateSeat(connection, newFlightId, ns.seat_number, bookingId, booking.user_id);
       }
@@ -230,7 +250,7 @@ class RebookingService {
       if (existingTicket) {
         await connection.execute(
           `UPDATE tickets SET flight_id = ?, seat_number = ?, status = 'ISSUED' WHERE ticket_id = ?`,
-          [newFlightId, ns.seat_number || existingTicket.seat_number, existingTicket.ticket_id]
+          [newFlightId, ns.seat_number, existingTicket.ticket_id]
         );
       }
     }
@@ -248,7 +268,7 @@ class RebookingService {
       'CONFIRMED',
       actor,
       `Rebooked from Flight #${oldFlightId} to Flight #${newFlightId} (${reason})`,
-      { allowReactivation: true, operation: 'REBOOKING' }
+      { allowReactivation: true, allowCheckInReset: true, operation: 'REBOOKING' }
     );
 
     // 8. RECORD REBOOKING HISTORY

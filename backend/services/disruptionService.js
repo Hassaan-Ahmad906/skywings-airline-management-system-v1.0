@@ -9,8 +9,8 @@ class DisruptionService {
   /**
    * Previews disruption impact (affected bookings, passengers, tickets, seats) without modifying database
    */
-  async calculateImpact(flightId, disruptionType, payload = {}) {
-    const pool = db.pool;
+  async calculateImpact(flightId, disruptionType, payload = {}, connection = null) {
+    const pool = connection || db.pool;
     const [flights] = await pool.execute(
       `SELECT f.*, a.model as aircraft_model, a.capacity
        FROM flights f
@@ -34,7 +34,7 @@ class DisruptionService {
       `SELECT b.*, u.email as user_email
        FROM bookings b
        INNER JOIN users u ON b.user_id = u.user_id
-       WHERE b.flight_id = ? AND b.status IN ('CONFIRMED', 'CHECKED_IN', 'confirmed')`,
+       WHERE b.flight_id = ? AND b.status IN ('PENDING','CONFIRMED','CHECKED_IN','BOARDED')`,
       [flightId]
     );
 
@@ -45,7 +45,7 @@ class DisruptionService {
        FROM booking_passengers bp
        INNER JOIN passengers p ON bp.passenger_id = p.passenger_id
        INNER JOIN bookings b ON bp.booking_id = b.booking_id
-       WHERE b.flight_id = ? AND b.status IN ('CONFIRMED', 'CHECKED_IN', 'confirmed')`,
+       WHERE b.flight_id = ? AND b.status IN ('PENDING','CONFIRMED','CHECKED_IN','BOARDED')`,
       [flightId]
     );
 
@@ -83,10 +83,13 @@ class DisruptionService {
    * Executes flight disruption under lock-first transaction control
    */
   async executeDisruption(connection, flightId, payload, actor, executionKey = null) {
+    if (actor?.role !== 'admin') throw Object.assign(new Error('Administrator authorization required'), { status: 403 });
+    if (typeof payload.reason !== 'string' || payload.reason.trim().length < 3 || payload.reason.length > 500) throw Object.assign(new Error('Provide a reason of 3–500 characters'), { status: 400 });
     // 1. Idempotency Check
     if (executionKey) {
       const existing = await disruptionRepository.findByExecutionKey(connection, executionKey);
       if (existing) {
+        if (existing.flight_id !== flightId) throw Object.assign(new Error('Execution key belongs to another flight'), { status: 409 });
         return {
           disruption: existing,
           isDuplicateExecution: true
@@ -136,7 +139,24 @@ class DisruptionService {
 
     try {
       // 4. Re-calculate affected passengers inside active transaction
-      const impactData = await this.calculateImpact(flightId, disruptionType, payload);
+      const impactData = await this.calculateImpact(flightId, disruptionType, payload, connection);
+      const management = require('./flightManagementService');
+      const updated = management.validateFlight({ ...flight,
+        ...(disruptionType === 'CANCELLATION' ? { status: 'cancelled' } : {}),
+        ...(['DELAY','SCHEDULE_CHANGE'].includes(disruptionType) ? { departure_datetime: payload.new_departure_datetime, arrival_datetime: payload.new_arrival_datetime, status: 'delayed' } : {}),
+        ...(disruptionType === 'AIRCRAFT_CHANGE' ? { aircraft_id: payload.new_aircraft_id } : {}) });
+      await management.validateReferences(connection, updated, flightId);
+      if (disruptionType !== 'CANCELLATION' && impactData.affected_bookings.some(booking => booking.status === 'BOARDED')) throw Object.assign(new Error('Cannot change an itinerary after boarding'), { status: 409 });
+      if (disruptionType === 'AIRCRAFT_CHANGE') {
+        for (const cabin of ['economy','business','first']) {
+          const reserved = impactData.affected_bookings.filter(booking => booking.class === cabin).reduce((sum, booking) => sum + Number(booking.number_of_passengers), 0);
+          const [seats] = await connection.execute('SELECT COUNT(*) AS capacity FROM seats WHERE aircraft_id = ? AND seat_class = ? AND is_available = 1', [updated.aircraft_id, cabin]);
+          if (reserved > seats[0].capacity) throw Object.assign(new Error(`New aircraft has insufficient ${cabin} capacity`), { status: 409 });
+          const bookingIds = new Set(impactData.affected_bookings.filter(booking => booking.class === cabin).map(booking => booking.booking_id));
+          const assigned = impactData.affected_passengers.filter(passenger => bookingIds.has(passenger.booking_id)).map(passenger => passenger.seat_number).filter(Boolean);
+          if ((await require('../repositories/seatRepository').verifySeatsBelongToAircraft(connection, updated.aircraft_id, assigned, cabin)).length) throw Object.assign(new Error('Assigned seats are incompatible with the new aircraft; rebook affected passengers first'), { status: 409 });
+        }
+      }
 
       // 5. Apply Disruption Policy Logic
       if (disruptionType === 'CANCELLATION') {
@@ -149,7 +169,7 @@ class DisruptionService {
             connection,
             b.booking_id,
             'CANCELLED',
-            { type: 'SYSTEM', userId: actor ? actor.userId : null, role: actor ? actor.role : 'admin' },
+            { type: 'ADMIN', userId: actor.userId, role: actor.role },
             `Flight ${flight.flight_number} cancellation: ${payload.reason}`,
             { allowOverride: true }
           );
@@ -166,14 +186,23 @@ class DisruptionService {
         );
       }
 
+      await require('../repositories/seatHoldRepository').releaseHoldsForCancelledFlight(connection, flightId);
+      if (disruptionType !== 'CANCELLATION') {
+        for (const booking of impactData.affected_bookings.filter(booking => booking.status === 'CHECKED_IN')) {
+          await connection.execute('DELETE FROM check_ins WHERE booking_id = ?', [booking.booking_id]);
+          await connection.execute('UPDATE booking_passengers SET boarding_token = NULL, boarded_at = NULL WHERE booking_id = ?', [booking.booking_id]);
+          await bookingStateMachine.transitionBookingState(connection, booking.booking_id, 'CONFIRMED', { ...actor, type: 'ADMIN' }, 'Itinerary changed; check in again', { allowCheckInReset: true, operation: 'DISRUPTION' });
+        }
+      }
+
       // 6. Populate Affected Passengers Notification Queue
       const affectedList = await Promise.all(
         impactData.affected_passengers.map(async (p) => {
-          const tickets = await ticketRepository.findByBookingIdAndPassengerId(connection, p.booking_id, p.passenger_id);
+          const ticket = await ticketRepository.findByBookingIdAndPassengerId(connection, p.booking_id, p.passenger_id);
           return {
             booking_id: p.booking_id,
             passenger_id: p.passenger_id,
-            ticket_id: tickets.length > 0 ? tickets[0].ticket_id : null,
+            ticket_id: ticket ? ticket.ticket_id : null,
             seat_number: p.seat_number,
             check_in_status: p.booking_status
           };

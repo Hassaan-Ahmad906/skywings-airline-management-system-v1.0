@@ -48,10 +48,12 @@ class BookingService {
    * Enterprise-Grade Transactional Booking Creation with Seat Concurrency, Hold Protection & E-Ticket Issuance
    */
   async createBooking(userId, bookingData) {
-    const { flight_id, passengers, idempotency_key = null, session_id = null, is_pending = false } = bookingData;
-    const flightClass = (bookingData.class || bookingData.flight_class || 'economy').toLowerCase();
-    const targetStatus = (is_pending || bookingData.status === 'PENDING') ? 'PENDING' : 'CONFIRMED';
-    const targetPayment = (is_pending || bookingData.status === 'PENDING') ? 'pending' : 'paid';
+    const flightClass = require('./bookingValidation').validateBooking(bookingData);
+    const { passengers, idempotency_key = null, session_id = null } = bookingData;
+    const flight_id = Number(bookingData.flight_id);
+    // A client request cannot establish successful payment.
+    const targetStatus = 'PENDING';
+    const targetPayment = 'pending';
 
     if (!flight_id || !passengers || !Array.isArray(passengers) || passengers.length === 0) {
       const error = new Error('Flight ID and passengers data are required');
@@ -101,7 +103,7 @@ class BookingService {
 
       // 5. If session_id is provided, verify active unexpired seat holds
       if (session_id) {
-        const activeSessionHolds = await seatHoldRepository.findActiveHoldsBySession(connection, session_id, userId);
+        const activeSessionHolds = await seatHoldRepository.findActiveHoldsBySession(connection, session_id, userId, flight_id);
 
         if (activeSessionHolds.length !== passengers.length) {
           if (idempotency_key) {
@@ -117,23 +119,20 @@ class BookingService {
           throw error;
         }
 
-        activeSessionHolds.forEach((hold, idx) => {
-          if (passengers[idx] && !passengers[idx].seat_number) {
-            passengers[idx].seat_number = hold.seat_number;
+        for (let index = 0; index < passengers.length; index++) {
+          const hold = activeSessionHolds.find(item => item.passenger_index === index);
+          const selected = passengers[index].seat_number?.trim().toUpperCase();
+          if (!hold || (selected && selected !== hold.seat_number)) {
+            const error = new Error('Selected seats must match the active holds for this flight and session.');
+            error.status = 409; error.code = 'HOLD_SEAT_MISMATCH'; throw error;
           }
-        });
+          passengers[index].seat_number = hold.seat_number;
+        }
       }
 
       // 6. Calculate current reserved capacity under FOR UPDATE lock
-      const reservedCapacityCount = await bookingRepository.countCapacityReserved(connection, flight_id);
-      const remainingSeats = flight.capacity - reservedCapacityCount;
-
-      if (remainingSeats < passengers.length) {
-        const error = new Error(`Not enough seats available. Only ${remainingSeats} seat(s) remaining.`);
-        error.code = 'CAPACITY_EXCEEDED';
-        error.status = 409;
-        throw error;
-      }
+      await bookingRepository.assertCapacity(connection, flight, flightClass, passengers.length, null,
+        passengers.map(p => typeof p.seat_number === 'string' ? p.seat_number.trim().toUpperCase() : '').filter(Boolean));
 
       // 7. Calculate total amount & generate unique reference
       const totalAmount = parseFloat(flight.price) * passengers.length;
@@ -150,7 +149,7 @@ class BookingService {
         idempotency_key: idempotency_key,
         status: targetStatus,
         payment_status: targetPayment,
-        payment_method: bookingData.payment_method || 'Credit Card'
+        payment_method: null
       });
 
       // 9. Process & validate seat allocations
@@ -160,7 +159,8 @@ class BookingService {
         flight.aircraft_id,
         bookingId,
         userId,
-        passengers
+        passengers,
+        flightClass
       );
 
       // 10. Add passengers to booking & collect IDs for ticket issuance
@@ -199,7 +199,7 @@ class BookingService {
 
       // 13. Mark active session holds as CONSUMED
       if (session_id) {
-        await seatHoldRepository.markHoldsConsumed(connection, session_id, userId);
+        await seatHoldRepository.markHoldsConsumed(connection, session_id, userId, flight_id);
       }
 
       // 14. Commit transaction
@@ -250,6 +250,14 @@ class BookingService {
 
     try {
       await connection.beginTransaction();
+
+      const [flightRows] = await connection.execute('SELECT flight_id FROM bookings WHERE booking_id = ? AND user_id = ?', [bookingId, userId]);
+      if (flightRows.length) {
+        const [flights] = await connection.execute('SELECT departure_datetime FROM flights WHERE flight_id = ? FOR UPDATE', [flightRows[0].flight_id]);
+        if (options.requestingUser?.role !== 'admin' && new Date(flights[0].departure_datetime) <= new Date()) {
+          throw Object.assign(new Error('Customer cancellation is closed after departure'), { status: 409, code: 'CANCELLATION_CLOSED' });
+        }
+      }
 
       const booking = await bookingRepository.findById(connection, bookingId, userId, true);
       if (!booking) {

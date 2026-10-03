@@ -5,15 +5,7 @@ if (typeof window !== 'undefined' && 'scrollRestoration' in history) {
 }
 
 // ========== API CONFIGURATION ==========
-const API_BASE_URL = (typeof window !== 'undefined' && (
-    window.location.hostname === 'localhost' || 
-    window.location.hostname === '127.0.0.1' || 
-    window.location.hostname === '::1' ||
-    window.location.origin.includes('localhost') ||
-    window.location.origin.includes('127.0.0.1')
-))
-    ? (window.location.port === '3000' ? '/api' : `http://${window.location.hostname || 'localhost'}:3000/api`) 
-    : '/api';
+const API_BASE_URL = '/api';
 
 // Helper function to get auth token
 function getAuthToken() {
@@ -172,84 +164,20 @@ function updateNavbar() {
 
 // Helper function to make API requests
 async function apiRequest(endpoint, options = {}) {
-    // Rely on server-side httpOnly cookie for authentication.
-    const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers
-    };
-
-    const url = `${API_BASE_URL}${endpoint}`;
-    console.log(`API Request: ${options.method || 'GET'} ${url}`);
-    if (options.body) {
-        console.log('Request body:', options.body);
+    const response = await fetch(API_BASE_URL + endpoint, {
+        ...options, headers: { 'Content-Type': 'application/json', ...options.headers }, credentials: 'include'
+    });
+    let data;
+    try { data = await response.json(); } catch { throw new Error('The server returned an invalid response. Please retry.'); }
+    if (!response.ok || data.success === false) {
+        const message = data.message || data.error?.message || (Array.isArray(data.errors) ? data.errors.map(e => e.msg || e.message).join(', ') : '') || 'Request failed. Please retry.';
+        if (endpoint.includes('/checkin') && /already checked in/i.test(message)) return data;
+        const error = new Error(message);
+        error.code = data.error?.code || data.code;
+        error.status = response.status;
+        throw error;
     }
-
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers,
-            credentials: 'include' // send cookies for auth
-        });
-
-        console.log(`API Response status: ${response.status} ${response.statusText}`);
-
-        let data;
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            data = await response.json();
-        } else {
-            const text = await response.text();
-            console.error('Non-JSON response:', text);
-            throw new Error('Server returned non-JSON response');
-        }
-        
-        console.log('API Response data:', data);
-        
-        if (!response.ok) {
-            // Handle authentication errors - don't clear auth data for check-in or bookings endpoints unless it's a real auth failure
-            if (response.status === 401 || response.status === 403) {
-                // Check if this is a check-in or bookings endpoint - if so, provide better error message without clearing session
-                if (endpoint.includes('/checkin') || endpoint.includes('/bookings')) {
-                    const errorMsg = data.message || 'Authentication required';
-                    throw new Error(errorMsg);
-                }
-                // For other endpoints, clear auth data on auth failure only if token is explicitly invalid
-                if (data.message && (data.message.includes('invalid token') || data.message.includes('token expired') || data.message.includes('unauthorized'))) {
-                    // Don't auto-redirect - let the calling function handle it
-                    throw new Error(data.message || 'Your session has expired. Please login again.');
-                }
-            }
-            
-            // For check-in endpoints, if the error is "Already checked in", return the data instead of throwing
-            // This allows the calling function to handle it gracefully without redirecting to login
-            if (endpoint.includes('/checkin') && response.status === 400 && 
-                data.message && (data.message.includes('Already checked in') || data.message.includes('already checked in'))) {
-                // Return the response data so the calling function can handle "already checked in" case
-                return data;
-            }
-            
-            // Handle validation errors
-            if (data.errors && Array.isArray(data.errors)) {
-                const errorMessages = data.errors.map(err => err.msg || err.message).join(', ');
-                throw new Error(errorMessages || data.message || 'Request failed');
-            }
-            throw new Error(data.message || `Request failed with status ${response.status}`);
-        }
-
-        return data;
-    } catch (error) {
-        console.error('API request error:', error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            endpoint: url,
-            method: options.method || 'GET'
-        });
-        if (error.message) {
-            throw error;
-        }
-        throw new Error('Network error. Please check your connection and server status.');
-    }
+    return data;
 }
 
 // ========== AUTHENTICATION CHECK ==========
@@ -365,6 +293,8 @@ async function handlePageRestore() {
     if (authState.isLoggedIn && isAuthOrLandingPage(page)) {
         if (authState.userRole === 'admin') {
             window.location.replace('admin-dashboard.html');
+        } else if (authState.userRole === 'crew') {
+            window.location.replace('crew-portal.html');
         } else {
             window.location.replace('user-dashboard.html');
         }
@@ -419,6 +349,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     // Admin pages - require admin role
+    if (page === 'crew-portal.html' && (!authState.isLoggedIn || !['admin','crew'].includes(authState.userRole))) {
+        window.location.replace('login.html'); return;
+    }
     if (isAdminRoute(page)) {
         if (!requireAuth('admin')) {
             return; // Stop execution if not authenticated
@@ -900,6 +833,8 @@ async function handleLogin(event) {
         let redirectUrl;
         if (response.data.user.role === 'admin') {
             redirectUrl = (redirectTo && redirectTo.includes('admin')) ? redirectTo : 'admin-dashboard.html';
+        } else if (response.data.user.role === 'crew') {
+            redirectUrl = 'crew-portal.html';
         } else {
             redirectUrl = (redirectTo && !redirectTo.includes('admin')) ? redirectTo : 'user-dashboard.html';
         }
@@ -1787,6 +1722,7 @@ function setQuickDate(preset) {
 
 function sortFlightResults(criterion) {
     currentSortCriterion = criterion;
+    if (typeof journeySearch !== 'undefined' && journeySearch) { renderJourneyResults(); return; }
     document.querySelectorAll('.sort-chip').forEach(chip => chip.classList.remove('active'));
     
     const activeChip = Array.from(document.querySelectorAll('.sort-chip')).find(c => {
@@ -1826,6 +1762,7 @@ function sortFlightResults(criterion) {
 
 async function handleFlightSearch(event) {
     event.preventDefault();
+    if (typeof handleJourneySearch === 'function') return handleJourneySearch(event);
     const formData = new FormData(event.target);
     const from = formData.get('from');
     const to = formData.get('to');
@@ -1842,7 +1779,7 @@ async function handleFlightSearch(event) {
         resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (flightsList) {
-        flightsList.innerHTML = `
+        flightsList.innerHTML = html`
             <div style="padding: 2.5rem; text-align: center; color: #94a3b8;">
                 <div style="font-size: 2.5rem; animation: spin 1s infinite linear; display: inline-block; margin-bottom: 1rem;">✈️</div>
                 <h3 style="color: #f8fafc; margin-bottom: 0.5rem;">Scanning SkyWings Route Network...</h3>
@@ -1867,7 +1804,7 @@ async function handleFlightSearch(event) {
             
             if (flightsList) {
                 if (currentSearchResults.length === 0) {
-                    flightsList.innerHTML = `
+                    flightsList.innerHTML = html`
                         <div class="checkin-status-card" style="text-align: center; padding: 2.5rem;">
                             <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
                             <h3 style="color: #f8fafc; margin-bottom: 0.5rem;">No Flights Found for this Route/Date</h3>
@@ -1888,7 +1825,7 @@ async function handleFlightSearch(event) {
         }
     } catch (error) {
         if (flightsList) {
-            flightsList.innerHTML = `
+            flightsList.innerHTML = html`
                 <div class="checkin-status-card error" style="padding: 2rem;">
                     <h3 style="color: #f87171; margin-bottom: 0.5rem;">⚠️ Flight Search Failed</h3>
                     <p style="color: #cbd5e1; margin: 0;">${error.message || 'Unable to communicate with the flight search engine.'}</p>
@@ -1990,7 +1927,7 @@ function generateFlightResults(flights) {
             ];
         }
         
-        return `
+        return html`
             <div class="flight-card modern-result-card" id="flight-card-${flight.flight_id}">
                 <!-- Top Row: Flight ID, Aircraft & Real-Time Seat Status -->
                 <div class="flight-card-top">
@@ -2003,19 +1940,19 @@ function generateFlightResults(flights) {
                         </span>
                     </div>
                     <div>
-                        ${seatsLeft <= 5 && seatsLeft > 0 ? `
+                        ${rawHtml(seatsLeft <= 5 && seatsLeft > 0 ? html`
                             <span style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700;">
                                 🔥 Only ${seatsLeft} seat${seatsLeft > 1 ? 's' : ''} left!
                             </span>
-                        ` : seatsLeft === 0 ? `
+                        ` : seatsLeft === 0 ? html`
                             <span style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700;">
                                 ❌ Sold Out
                             </span>
-                        ` : `
+                        ` : html`
                             <span style="color: #34d399; font-size: 0.8rem; font-weight: 700;">
                                 ✅ ${seatsLeft} seats available
                             </span>
-                        `}
+                        `)}
                     </div>
                 </div>
 
@@ -2046,7 +1983,7 @@ function generateFlightResults(flights) {
                             <div class="price-tag" id="flight-price-tag-${flight.flight_id}">$${numPrice.toFixed(2)}</div>
                             <div class="price-subtext" id="flight-price-subtext-${flight.flight_id}">${numPassengers > 1 ? `Total: $${totalPrice} (${numPassengers} pax • ${flightClass.toUpperCase()})` : `per passenger • ${flightClass.toUpperCase()}`}</div>
                         </div>
-                        <button type="button" class="btn-book-flight" ${seatsLeft === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} onclick="bookFlight(${flight.flight_id}, ${numPrice}, '${flightClass}', ${numPassengers})">
+                        <button type="button" class="btn-book-flight" ${rawHtml(seatsLeft === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : '')} onclick="bookFlight(${flight.flight_id}, ${numPrice}, '${flightClass}', ${numPassengers})">
                             ${seatsLeft === 0 ? 'Sold Out' : 'Book Flight →'}
                         </button>
                     </div>
@@ -2055,7 +1992,7 @@ function generateFlightResults(flights) {
                 <!-- Bottom Row: Dynamic Amenities & Interactive Cabin Class Switcher -->
                 <div class="flight-card-bottom">
                     <div class="flight-amenities-list">
-                        ${amenities.join('')}
+                        ${rawHtml(amenities.join(''))}
                     </div>
                     <div class="flight-cabin-pills">
                         <button type="button" class="cabin-pill ${flightClass === 'economy' ? 'selected' : ''}" data-class="economy" onclick="changeFlightCardClass(${flight.flight_id}, 'economy', ${basePrice}, ${businessPrice}, ${firstPrice}, ${numPassengers})">
@@ -2128,6 +2065,11 @@ function showBookingModal(flightId, price, flightClass, numPassengers) {
         return;
     }
     
+    bookingForm.dataset.action = 'pay';
+    bookingForm.dataset.idempotencyKey = crypto.randomUUID();
+    delete bookingForm.dataset.journeyFlights;
+    delete bookingForm.dataset.journeyType;
+
     // Set hidden fields
     document.getElementById('bookingFlightId').value = flightId;
     document.getElementById('bookingFlightClass').value = flightClass;
@@ -2144,7 +2086,7 @@ function showBookingModal(flightId, price, flightClass, numPassengers) {
         const passengerDiv = document.createElement('div');
         passengerDiv.className = 'passenger-form-section';
         passengerDiv.style.cssText = 'margin-bottom: 2rem; padding: 1.5rem; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);';
-        passengerDiv.innerHTML = `
+        passengerDiv.innerHTML = html`
             <h3 style="margin-bottom: 1rem; color: rgba(255,255,255,0.9);">Passenger ${i}</h3>
             <div class="form-row">
                 <div class="form-group">
@@ -2159,7 +2101,7 @@ function showBookingModal(flightId, price, flightClass, numPassengers) {
             <div class="form-row">
                 <div class="form-group">
                     <label>Date of Birth</label>
-                    <input type="date" name="passenger_${i}_dob" max="${new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}" min="1900-01-01" maxlength="10" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}">
+                    <input type="date" name="passenger_${i}_dob" max="${new Date().toISOString().split('T')[0]}" min="1900-01-01" maxlength="10" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}">
                 </div>
                 <div class="form-group">
                     <label>Passport Number</label>
@@ -2180,7 +2122,7 @@ function showBookingModal(flightId, price, flightClass, numPassengers) {
     if (currentBookingFlight) {
         const dep = new Date(currentBookingFlight.departure_datetime);
         const arr = new Date(currentBookingFlight.arrival_datetime);
-        summaryDiv.innerHTML = `
+        summaryDiv.innerHTML = html`
             <h4 style="margin-bottom: 0.5rem; color: var(--accent);">Flight Summary</h4>
             <p><strong>Route:</strong> ${currentBookingFlight.from_city || 'N/A'} → ${currentBookingFlight.to_city || 'N/A'}</p>
             <p><strong>Departure:</strong> ${dep.toLocaleString()}</p>
@@ -2197,7 +2139,7 @@ function showBookingModal(flightId, price, flightClass, numPassengers) {
     
     const actionButtons = document.createElement('div');
     actionButtons.className = 'booking-modal-actions';
-    actionButtons.innerHTML = `
+    actionButtons.innerHTML = html`
         <button type="button" class="btn btn-secondary btn-modal-action" onclick="closeBookingModal()">Cancel</button>
         <button type="button" class="btn btn-warning btn-modal-action" onclick="submitPendingBooking(event)">⏱️ Reserve & Hold (Pay Later)</button>
         <button type="submit" class="btn btn-primary btn-modal-action">💳 Pay & Confirm Now</button>
@@ -2218,22 +2160,19 @@ function closeBookingModal() {
     }
 }
 
-async function submitPendingBooking(event) {
+function submitPendingBooking() {
     const form = document.getElementById('bookingForm');
     if (!form) return;
-    
-    const hiddenField = document.createElement('input');
-    hiddenField.type = 'hidden';
-    hiddenField.name = 'is_pending';
-    hiddenField.value = 'true';
-    form.appendChild(hiddenField);
-    
+    form.dataset.action = 'reserve';
     form.requestSubmit();
 }
 
 async function handleBookingSubmit(event) {
     event.preventDefault();
     const form = event.target;
+    if (form.dataset.processing === 'true') return;
+    const reserveOnly = form.dataset.action === 'reserve';
+    form.dataset.action = 'pay';
     const formData = new FormData(form);
     
     const flightId = parseInt(formData.get('flightId'));
@@ -2262,17 +2201,21 @@ async function handleBookingSubmit(event) {
     
     const submitBtn = form.querySelector('button[type="submit"]');
     const originalText = submitBtn.textContent;
+    form.dataset.processing = 'true';
+    const actionButtons = Array.from(form.querySelectorAll('.booking-modal-actions button'));
+    actionButtons.forEach(button => button.disabled = true);
     submitBtn.disabled = true;
     submitBtn.textContent = 'Processing...';
     
     try {
-        const response = await apiRequest('/bookings/create', {
+        const journeyIds = form.dataset.journeyFlights ? JSON.parse(form.dataset.journeyFlights) : null;
+        const response = await apiRequest(journeyIds ? '/itineraries' : '/bookings/create', {
             method: 'POST',
             body: JSON.stringify({
-                flight_id: flightId,
+                ...(journeyIds ? { flight_ids:journeyIds, trip_type:form.dataset.journeyType } : { flight_id: flightId }),
                 passengers: passengers,
                 class: flightClass,
-                is_pending: true
+                idempotency_key: form.dataset.idempotencyKey || (form.dataset.idempotencyKey = crypto.randomUUID())
             })
         });
         
@@ -2280,15 +2223,25 @@ async function handleBookingSubmit(event) {
         submitBtn.textContent = originalText;
 
         if (response.success && response.data) {
-            const booking = response.data.booking || response.data;
+            const booking = response.data.itinerary || response.data.booking || response.data;
+            if (booking.itinerary_id) booking.payment_target = `/itineraries/${booking.itinerary_id}/pay`;
             closeBookingModal();
-            openMockPaymentModal(booking);
+            if (reserveOnly) {
+                const deadline = new Date(booking.reservation_expires_at).toLocaleString();
+                alert(`Reservation ${booking.booking_reference} saved. Complete payment by ${deadline}.`);
+                window.location.href = 'my-bookings.html';
+            } else {
+                await openMockPaymentModal(booking);
+            }
         } else {
             throw new Error(response.message || 'Failed to initialize booking');
         }
     } catch (error) {
         console.error('Booking error:', error);
         alert('Failed to create booking: ' + error.message);
+    } finally {
+        form.dataset.processing = 'false';
+        actionButtons.forEach(button => button.disabled = false);
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
     }
@@ -2353,7 +2306,7 @@ async function loadUserDashboardData() {
             if (isFuture && status !== 'cancelled' && status !== 'expired') {
                 upcomingCount++;
             }
-            if (status === 'boarded' || status === 'completed' || (!isFuture && (status === 'confirmed' || status === 'checked_in'))) {
+            if (status === 'completed') {
                 completedCount++;
             }
             if (payment === 'paid' && status !== 'cancelled') {
@@ -2402,7 +2355,7 @@ async function loadUserDashboardData() {
                     else if (status === 'pending') badgeLabel = '⏳ PENDING';
                     else if (status === 'confirmed') badgeLabel = 'CONFIRMED';
 
-                    return `
+                    return html`
                         <div class="flight-card" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; margin-bottom: 12px;">
                             <div class="flight-info">
                                 <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
@@ -2413,8 +2366,8 @@ async function loadUserDashboardData() {
                                 <p style="margin: 0; color: #94a3b8; font-size: 0.85rem;">📅 ${dep.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at ${dep.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
                             </div>
                             <div class="flight-actions" style="display: flex; gap: 8px; align-items: center;">
-                                ${status === 'pending' ? `<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : ''}
-                                ${status === 'confirmed' ? `<button class="btn btn-sm btn-secondary" onclick="checkIn(${booking.booking_id})">Check-in</button>` : ''}
+                                ${rawHtml(status === 'pending' ? html`<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : '')}
+                                ${rawHtml(status === 'confirmed' ? html`<button class="btn btn-sm btn-secondary" onclick="checkIn(${booking.booking_id})">Check-in</button>` : '')}
                                 <button class="btn btn-sm btn-primary" onclick="viewBookingDetails(${booking.booking_id})">View Details</button>
                             </div>
                         </div>
@@ -2443,10 +2396,6 @@ async function loadUserDashboardData() {
                     const flightHasPassed = dep < now;
                     
                     let displayStatus = String(booking.status || 'pending').toLowerCase();
-                    if (flightHasPassed && (displayStatus === 'confirmed' || displayStatus === 'completed' || displayStatus === 'checked_in')) {
-                        const hasSeats = booking.passengers && booking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-                        displayStatus = hasSeats ? 'boarded' : 'missed';
-                    }
                     
                     const displayStatusText = String(displayStatus).toLowerCase();
                     let badgeLabel = displayStatusText.toUpperCase();
@@ -2456,7 +2405,7 @@ async function loadUserDashboardData() {
                     else if (displayStatusText === 'pending') badgeLabel = '⏳ PENDING';
                     else if (displayStatusText === 'cancelled') badgeLabel = '🚫 CANCELLED';
                     
-                    return `
+                    return html`
                         <tr>
                             <td><strong style="color: #f8fafc;">${booking.booking_reference || 'N/A'}</strong></td>
                             <td><strong style="color: #38bdf8;">${booking.flight_number || 'N/A'}</strong></td>
@@ -2465,7 +2414,7 @@ async function loadUserDashboardData() {
                             <td>
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     <button class="btn btn-sm btn-secondary" onclick="viewBookingDetails(${booking.booking_id})">View</button>
-                                    ${displayStatusText === 'pending' && !flightHasPassed ? `<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : ''}
+                                    ${rawHtml(displayStatusText === 'pending' && !flightHasPassed ? html`<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : '')}
                                 </div>
                             </td>
                         </tr>
@@ -2577,7 +2526,7 @@ async function loadDashboardRecentBookings() {
                 const routeText = group.from_code && group.to_code ? `${group.from_code} → ${group.to_code}` : 'Route';
 
                 const headerTr = document.createElement('tr');
-                headerTr.innerHTML = `
+                headerTr.innerHTML = html`
                     <td colspan="7" style="padding: 7px 14px; background: linear-gradient(90deg, rgba(2, 132, 199, 0.22), rgba(15, 23, 42, 0.85)); border-top: 1px solid rgba(56, 189, 248, 0.35);">
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.84rem; flex-wrap: wrap; gap: 6px;">
                             <span style="font-weight: 800; color: #38bdf8;">✈️ Flight ${group.flight_number} <span style="color: #f8fafc; font-weight: 600;">(${routeText})</span></span>
@@ -2596,7 +2545,7 @@ async function loadDashboardRecentBookings() {
                     }
 
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `
+                    tr.innerHTML = html`
                         <td><strong style="color: #f8fafc;">${b.booking_reference || 'N/A'}</strong></td>
                         <td><span style="color: #f1f5f9; font-weight: 600;">${b.user_first_name || ''} ${b.user_last_name || ''}</span></td>
                         <td><strong style="color: #38bdf8;">${b.flight_number || 'N/A'}</strong><br><small style="color: #cbd5e1;">${b.from_code || ''} → ${b.to_code || ''}</small></td>
@@ -2613,7 +2562,7 @@ async function loadDashboardRecentBookings() {
         }
     } catch (error) {
         console.error('Error loading dashboard recent bookings:', error);
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 20px;">⚠️ Error loading recent bookings: ${error.message}</td></tr>`;
+        tbody.innerHTML = html`<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 20px;">⚠️ Error loading recent bookings: ${error.message}</td></tr>`;
     }
 }
 
@@ -2767,47 +2716,6 @@ function renderBookingChart(bookingTrend) {
 
 // ========== BOOKINGS ==========
 
-// Function to synchronize booking statuses based on flight dates
-async function synchronizeBookingStatuses(bookings) {
-    const now = new Date();
-    const updatesNeeded = [];
-    
-    for (const booking of bookings) {
-        if (!booking.departure_datetime || !booking.arrival_datetime) continue;
-        
-        const dep = new Date(booking.departure_datetime);
-        const arr = new Date(booking.arrival_datetime);
-        
-        // Only process active/confirmed bookings
-        if (booking.status !== 'confirmed' && booking.status !== 'checked_in') continue;
-        
-        // Check if flight has arrived/departed
-        if (arr < now || dep < now) {
-            // Check if passenger has seat assigned (indicating check-in / boarding)
-            const hasSeats = booking.passengers && Array.isArray(booking.passengers) && booking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-            const newStatus = hasSeats ? 'boarded' : 'missed';
-            
-            if (newStatus !== (booking.status || '').toLowerCase()) {
-                updatesNeeded.push({ bookingId: booking.booking_id, newStatus });
-            }
-        }
-    }
-    
-    // Update statuses if needed (in background, don't block UI)
-    if (updatesNeeded.length > 0) {
-        await Promise.all(updatesNeeded.map(async ({ bookingId, newStatus }) => {
-            try {
-                await apiRequest(`/bookings/${bookingId}/update-status`, {
-                    method: 'POST',
-                    body: JSON.stringify({ status: newStatus })
-                });
-            } catch (error) {
-                console.warn('Failed to update booking status:', error);
-            }
-        }));
-    }
-}
-
 async function filterBookings(arg1, arg2) {
     let evt = null;
     let status = 'all';
@@ -2855,21 +2763,6 @@ async function filterBookings(arg1, arg2) {
                 let allUserBookings = response.data.bookings || [];
                 const now = new Date();
 
-                // Normalize in-memory statuses for expired holds or departed flights
-                allUserBookings.forEach(b => {
-                    const depDate = new Date(b.departure_datetime || b.booking_date);
-                    const isPast = !isNaN(depDate) && depDate < now;
-                    let bStat = (b.status || 'pending').toLowerCase();
-                    if (isPast) {
-                        if (bStat === 'confirmed' || bStat === 'completed' || bStat === 'checked_in') {
-                            const hasSeats = b.passengers && b.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-                            b.status = hasSeats ? 'boarded' : 'missed';
-                        } else if (bStat === 'pending') {
-                            b.status = 'expired';
-                        }
-                    }
-                });
-
                 // Filter by selected tab
                 let filteredBookings = allUserBookings;
                 if (status === 'upcoming') {
@@ -2912,10 +2805,10 @@ async function filterBookings(arg1, arg2) {
                         let statusNote = '';
                         if (displayStatus === 'boarded') {
                             badgeLabel = '✈️ BOARDED';
-                            statusNote = '<p style="margin-top: 0.35rem; color: #22d3ee; font-size: 0.85rem; font-weight: 600;">✈️ Flight Completed • Passenger Boarded</p>';
+                            statusNote = '<p style="margin-top: 0.35rem; color: #22d3ee; font-size: 0.85rem; font-weight: 600;">Passenger boarded; awaiting flight completion</p>';
                         } else if (displayStatus === 'missed') {
                             badgeLabel = '⚠️ MISSED';
-                            statusNote = '<p style="margin-top: 0.35rem; color: #fbbf24; font-size: 0.85rem; font-weight: 600;">⚠️ Flight Departed • Check-in Missed</p>';
+                            statusNote = '<p style="margin-top: 0.35rem; color: #fbbf24; font-size: 0.85rem; font-weight: 600;">Flight departed; no boarding recorded</p>';
                         } else if (displayStatus === 'checked_in') {
                             badgeLabel = '✅ CHECKED IN';
                             statusNote = '<p style="margin-top: 0.35rem; color: #2dd4bf; font-size: 0.85rem; font-weight: 600;">✅ Checked In • Ready for Boarding</p>';
@@ -2924,10 +2817,10 @@ async function filterBookings(arg1, arg2) {
                             statusNote = '<p style="margin-top: 0.35rem; color: #34d399; font-size: 0.85rem; font-weight: 600;">✅ Confirmed & Scheduled</p>';
                         } else if (displayStatus === 'pending') {
                             badgeLabel = '⏳ PENDING';
-                            statusNote = '<p style="margin-top: 0.35rem; color: #fbbf24; font-size: 0.85rem; font-weight: 600;">⏳ Seat Reserved • Awaiting Payment</p>';
+                            statusNote = html`<p style="margin-top: 0.35rem; color: #fbbf24; font-size: 0.85rem; font-weight: 600;">Reservation awaiting payment. Deadline: ${booking.reservation_expires_at ? new Date(booking.reservation_expires_at).toLocaleString() : 'See reservation details'}</p>`;
                         } else if (displayStatus === 'cancelled') {
                             badgeLabel = '🚫 CANCELLED';
-                            statusNote = `<p style="margin-top: 0.35rem; color: #f87171; font-size: 0.85rem; font-weight: 600;">🚫 Cancelled ${booking.state_change_reason ? `(${booking.state_change_reason})` : ''}</p>`;
+                            statusNote = html`<p style="margin-top: 0.35rem; color: #f87171; font-size: 0.85rem; font-weight: 600;">Cancelled ${booking.state_change_reason || ''}${booking.refund_status === 'pending' ? ' - Refund awaiting provider processing' : booking.payment_method === 'Demo' && booking.refund_status === 'completed' ? ' - Demo refund recorded; no money was collected' : ''}</p>`;
                         } else if (displayStatus === 'expired') {
                             badgeLabel = 'EXPIRED';
                             statusNote = '<p style="margin-top: 0.35rem; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">⏳ Unpaid Hold Expired</p>';
@@ -2939,16 +2832,17 @@ async function filterBookings(arg1, arg2) {
                         const bookingCard = document.createElement('div');
                         bookingCard.className = 'booking-card';
                         bookingCard.setAttribute('data-status', displayStatus);
-                        bookingCard.innerHTML = `
+                        bookingCard.innerHTML = html`
                             <div class="booking-header">
                                 <div class="booking-id">
                                     <h3>Booking #${booking.booking_reference || 'N/A'}</h3>
+                                    ${rawHtml(booking.itinerary_id ? html`<p>Journey #${booking.itinerary_id} · Flight leg ${Number(booking.segment_index)+1}</p>` : '')}
                                     <span class="status-badge status-${displayStatus}" style="display: inline-flex !important; align-items: center !important; justify-content: center !important; visibility: visible !important; opacity: 1 !important; min-width: 90px; text-align: center !important; line-height: 1 !important; margin: 0 !important;">${badgeLabel}</span>
                                 </div>
                                 <div class="booking-date">
                                     <p>Booked on: ${bookingDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
                                     <p style="margin-top: 0.35rem; font-weight: 600; color: rgba(255,255,255,0.9);">Departure: ${dep.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at ${dep.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
-                                    ${statusNote}
+                                    ${rawHtml(statusNote)}
                                 </div>
                             </div>
                             <div class="booking-details">
@@ -2974,10 +2868,10 @@ async function filterBookings(arg1, arg2) {
                                     </div>
                                     <div class="booking-actions">
                                         <button class="btn btn-primary" onclick="viewBookingDetails(${booking.booking_id})">View Details</button>
-                                        ${displayStatus === 'checked_in' ? `<button class="btn btn-success" style="background: linear-gradient(135deg, #0284c7, #0b63c5); color: white; border: 1px solid rgba(56,189,248,0.5); font-weight: 700;" onclick="viewBoardingPassModal(${booking.booking_id})">🎫 Boarding Pass</button>` : ''}
-                                        ${displayStatus === 'pending' && !flightHasPassed ? `<button class="btn btn-success" style="background: linear-gradient(135deg, #059669, #10b981); color: white; border: none; font-weight: 700; padding: 6px 14px; border-radius: 8px;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Complete Payment</button>` : ''}
-                                        ${canCheckIn ? `<button class="btn btn-secondary" onclick="checkIn(${booking.booking_id})">Check-in</button>` : ''}
-                                        ${canCancel ? `<button class="btn btn-danger" onclick="cancelBooking(${booking.booking_id})">Cancel</button>` : ''}
+                                        ${rawHtml(displayStatus === 'checked_in' ? html`<button class="btn btn-success" style="background: linear-gradient(135deg, #0284c7, #0b63c5); color: white; border: 1px solid rgba(56,189,248,0.5); font-weight: 700;" onclick="viewBoardingPassModal(${booking.booking_id})">🎫 Boarding Pass</button>` : '')}
+                                        ${rawHtml(displayStatus === 'pending' && !flightHasPassed ? html`<button class="btn btn-success" style="background: linear-gradient(135deg, #059669, #10b981); color: white; border: none; font-weight: 700; padding: 6px 14px; border-radius: 8px;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Complete Payment</button>` : '')}
+                                        ${rawHtml(canCheckIn ? html`<button class="btn btn-secondary" onclick="checkIn(${booking.booking_id})">Check-in</button>` : '')}
+                                        ${rawHtml(canCancel ? html`<button class="btn btn-danger" onclick="cancelBooking(${booking.booking_id})">Cancel</button>` : '')}
                                     </div>
                                 </div>
                             </div>
@@ -2993,7 +2887,7 @@ async function filterBookings(arg1, arg2) {
             }
         } catch (error) {
             console.error('Error loading bookings:', error);
-            bookingsList.innerHTML = `<div class="empty-state"><p style="color: red;">Failed to load bookings: ${error.message}</p><p><a href="javascript:location.reload()">Refresh page</a></p></div>`;
+            bookingsList.innerHTML = html`<div class="empty-state"><p style="color: red;">Failed to load bookings: ${error.message}</p><p><a href="javascript:location.reload()">Refresh page</a></p></div>`;
         }
 
         return;
@@ -3044,335 +2938,18 @@ async function cancelBooking(bookingId) {
     }
 }
 
-// ========== MOCK PAYMENT SYSTEM ==========
-
-let activeMockPaymentState = {
-    type: 'card',
-    bookingId: null,
-    pnr: '',
-    amount: 0,
-    userName: 'VALUED PASSENGER',
-    userEmail: 'passenger@skywings.com'
-};
-
-function closeMockPaymentModal() {
-    const existing = document.getElementById('mockPaymentOverlay');
-    if (existing) existing.remove();
-}
-
-function openMockPaymentModal(booking) {
-    closeMockPaymentModal();
-
-    const bookingId = booking.booking_id;
-    const pnr = booking.booking_reference || `BKM#${bookingId}`;
-    const flightNum = booking.flight_number || 'SkyWings Flight';
-    const route = (booking.from_code && booking.to_code) 
-        ? `${booking.from_code} → ${booking.to_code}` 
-        : (booking.from_city && booking.to_city ? `${booking.from_city} → ${booking.to_city}` : 'Selected Flight');
-    const amount = parseFloat(booking.total_amount || 0).toFixed(2);
-    const flightClass = (booking.class || 'economy').toUpperCase();
-    const numPass = booking.number_of_passengers || (booking.passengers ? booking.passengers.length : 1);
-    
-    let userName = 'VALUED PASSENGER';
-    let userEmail = 'passenger@skywings.com';
-    if (typeof authState !== 'undefined' && authState.user) {
-        userName = authState.user.name || `${authState.user.first_name || ''} ${authState.user.last_name || ''}`.trim() || 'VALUED PASSENGER';
-        userEmail = authState.user.email || 'passenger@skywings.com';
-    }
-
-    activeMockPaymentState = {
-        type: 'card',
-        bookingId,
-        pnr,
-        amount: parseFloat(amount),
-        userName,
-        userEmail
-    };
-
-    const overlay = document.createElement('div');
-    overlay.id = 'mockPaymentOverlay';
-    overlay.className = 'mock-payment-overlay';
-    overlay.innerHTML = `
-        <div class="mock-payment-card">
-            <div class="mock-payment-header">
-                <h3>🔒 SkyWings Secure Checkout</h3>
-                <button type="button" onclick="closeMockPaymentModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer;">&times;</button>
-            </div>
-
-            <!-- Booking Summary Box -->
-            <div class="mock-booking-summary">
-                <div class="mock-summary-row">
-                    <span>Booking Ref:</span>
-                    <strong style="color: #f8fafc;">${pnr}</strong>
-                </div>
-                <div class="mock-summary-row">
-                    <span>Flight:</span>
-                    <span>✈️ ${flightNum} (${route})</span>
-                </div>
-                <div class="mock-summary-row">
-                    <span>Class & Guests:</span>
-                    <span>${flightClass} &bull; ${numPass} Passenger(s)</span>
-                </div>
-                <div class="mock-summary-row">
-                    <span>Total Fare Due:</span>
-                    <span style="color: #34d399; font-size: 1.15rem; font-weight: 800;">$${amount}</span>
-                </div>
-            </div>
-
-            <!-- Payment Method Tabs -->
-            <div class="payment-method-tabs">
-                <div class="payment-method-tab active" id="tabPayCard" onclick="switchMockPaymentTab('card')">💳 Credit / Debit Card</div>
-                <div class="payment-method-tab" id="tabPayPaypal" onclick="switchMockPaymentTab('paypal')">🅿️ PayPal Express</div>
-                <div class="payment-method-tab" id="tabPaySkymiles" onclick="switchMockPaymentTab('skymiles')">✈️ SkyMiles Pay</div>
-            </div>
-
-            <!-- Dynamic Payment Content Area -->
-            <div id="mockPaymentDynamicArea">
-                <!-- Injected via renderMockPaymentContent() -->
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(overlay);
-    renderMockPaymentContent('card');
-}
-
-function renderMockPaymentContent(type) {
-    activeMockPaymentState.type = type;
-    const dynamicArea = document.getElementById('mockPaymentDynamicArea');
-    if (!dynamicArea) return;
-
-    const amount = activeMockPaymentState.amount.toFixed(2);
-    const milesNeeded = Math.round(activeMockPaymentState.amount * 100);
-    const remainingMiles = Math.max(0, 75000 - milesNeeded);
-
-    if (type === 'card') {
-        dynamicArea.innerHTML = `
-            <!-- Visual Credit Card Preview -->
-            <div class="mock-card-visual">
-                <div class="mock-card-chip"></div>
-                <div class="mock-card-number-display" id="mockCardNumberPreview">4242 &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; 4242</div>
-                <div class="mock-card-footer">
-                    <div>
-                        <div style="font-size: 0.65rem; color: rgba(255,255,255,0.7);">Cardholder</div>
-                        <div class="mock-card-holder-name" id="mockCardNamePreview">${activeMockPaymentState.userName.toUpperCase()}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 0.65rem; color: rgba(255,255,255,0.7);">Expires</div>
-                        <div class="mock-card-holder-name">12/28</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Card Inputs Form -->
-            <form id="mockPaymentForm" onsubmit="executeMockPayment(event)">
-                <div class="mock-form-group">
-                    <label>Cardholder Name</label>
-                    <input type="text" id="mockCardHolder" value="${activeMockPaymentState.userName}" required oninput="document.getElementById('mockCardNamePreview').textContent = this.value.toUpperCase() || 'CARDHOLDER'">
-                </div>
-                <div class="mock-form-group">
-                    <label>Card Number</label>
-                    <input type="text" id="mockCardNum" value="4242 4242 4242 4242" maxlength="19" required oninput="updateMockCardDisplay(this.value)">
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <div class="mock-form-group" style="flex: 1;">
-                        <label>Expiry Date</label>
-                        <input type="text" id="mockCardExpiry" placeholder="MM/YY" value="12/28" maxlength="5" required>
-                    </div>
-                    <div class="mock-form-group" style="flex: 1;">
-                        <label>CVV / CVC</label>
-                        <input type="password" id="mockCardCvv" placeholder="CVV" value="888" maxlength="4" required>
-                    </div>
-                </div>
-
-                <div style="font-size: 0.75rem; color: #94a3b8; display: flex; align-items: center; gap: 6px; margin: 10px 0;">
-                    <span>🛡️ 256-Bit SSL Encrypted Mock Gateway</span>
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="mock-payment-actions">
-                    <button type="submit" class="btn-pay-now" id="btnExecuteMockPayment">💳 Pay Now & Confirm ($${amount})</button>
-                    <button type="button" class="btn-pay-later" onclick="deferPaymentAsPending()">⏳ Pay Later (Save Pending Reservation)</button>
-                </div>
-            </form>
-        `;
-    } else if (type === 'paypal') {
-        dynamicArea.innerHTML = `
-            <!-- Visual PayPal Wallet Preview -->
-            <div class="mock-paypal-visual">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div style="font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em;">🅿️ PayPal <span style="font-size: 0.85rem; font-weight: 400; opacity: 0.85;">Express Checkout</span></div>
-                    <span style="background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700;">Verified Sandbox</span>
-                </div>
-                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.85); margin-bottom: 4px;">Connected Account:</div>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #ffffff;" id="mockPaypalEmailPreview">${activeMockPaymentState.userEmail}</div>
-                <div style="margin-top: 10px; font-size: 0.75rem; color: rgba(255,255,255,0.75);">Instant 1-Click Authorization Enabled</div>
-            </div>
-
-            <!-- PayPal Inputs Form -->
-            <form id="mockPaymentForm" onsubmit="executeMockPayment(event)">
-                <div class="mock-form-group">
-                    <label>PayPal Account Email</label>
-                    <input type="email" id="mockPaypalEmail" value="${activeMockPaymentState.userEmail}" required oninput="document.getElementById('mockPaypalEmailPreview').textContent = this.value || 'account@paypal.com'">
-                </div>
-                <div class="mock-form-group">
-                    <label>PayPal Password / Passkey</label>
-                    <input type="password" id="mockPaypalPassword" value="SkyWingsPayPal#2026" placeholder="Enter PayPal password" required>
-                </div>
-
-                <div style="background: rgba(0, 121, 193, 0.12); border: 1px solid rgba(0, 121, 193, 0.3); border-radius: 8px; padding: 10px; margin: 12px 0; font-size: 0.8rem; color: #7dd3fc;">
-                    ℹ️ You will be charged <strong>$${amount} USD</strong> directly from your verified PayPal wallet or linked checking account.
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="mock-payment-actions">
-                    <button type="submit" class="btn-pay-now" id="btnExecuteMockPayment" style="background: linear-gradient(135deg, #0070ba, #003087);">🅿️ Pay with PayPal ($${amount})</button>
-                    <button type="button" class="btn-pay-later" onclick="deferPaymentAsPending()">⏳ Pay Later (Save Pending Reservation)</button>
-                </div>
-            </form>
-        `;
-    } else if (type === 'skymiles') {
-        dynamicArea.innerHTML = `
-            <!-- Visual SkyMiles Medallion Preview -->
-            <div class="mock-skymiles-visual">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div style="font-size: 1.25rem; font-weight: 800;">✈️ SkyMiles <span style="font-size: 0.82rem; font-weight: 400; opacity: 0.9;">Frequent Flyer</span></div>
-                    <span style="background: rgba(251, 191, 36, 0.25); color: #fef08a; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; border: 1px solid rgba(251, 191, 36, 0.4);">Gold Medallion</span>
-                </div>
-                <div style="font-size: 0.85rem; color: rgba(255,255,255,0.85); margin-bottom: 4px;">Member Account:</div>
-                <div style="font-size: 1.15rem; font-weight: 800; letter-spacing: 0.08em;" id="mockSkyMilesNumberPreview">SM-8492048</div>
-                <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.78rem; color: rgba(255,255,255,0.85);">
-                    <span>Available: <strong>75,000 Miles</strong></span>
-                    <span>Status: <strong>Active Elite</strong></span>
-                </div>
-            </div>
-
-            <!-- SkyMiles Inputs Form -->
-            <form id="mockPaymentForm" onsubmit="executeMockPayment(event)">
-                <div class="mock-form-group">
-                    <label>SkyMiles / Frequent Flyer ID</label>
-                    <input type="text" id="mockSkyMilesId" value="SM-8492048" required oninput="document.getElementById('mockSkyMilesNumberPreview').textContent = this.value.toUpperCase() || 'SM-0000000'">
-                </div>
-                <div class="mock-form-group">
-                    <label>4-Digit Account PIN</label>
-                    <input type="password" id="mockSkyMilesPin" value="7788" maxlength="4" required>
-                </div>
-
-                <!-- Points Breakdown Box -->
-                <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 12px; margin: 12px 0; font-size: 0.82rem; color: #fde68a;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                        <span>Redemption Rate:</span>
-                        <strong>100 Miles = $1.00 USD</strong>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                        <span>Miles Required:</span>
-                        <strong style="color: #fbbf24; font-size: 0.95rem;">${milesNeeded.toLocaleString()} Miles</strong>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; border-top: 1px dashed rgba(245, 158, 11, 0.3); padding-top: 4px; margin-top: 4px;">
-                        <span>Balance Remaining:</span>
-                        <strong style="color: #34d399;">${remainingMiles.toLocaleString()} Miles</strong>
-                    </div>
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="mock-payment-actions">
-                    <button type="submit" class="btn-pay-now" id="btnExecuteMockPayment" style="background: linear-gradient(135deg, #d97706, #b45309);">✈️ Redeem ${milesNeeded.toLocaleString()} Miles & Confirm</button>
-                    <button type="button" class="btn-pay-later" onclick="deferPaymentAsPending()">⏳ Pay Later (Save Pending Reservation)</button>
-                </div>
-            </form>
-        `;
-    }
-}
-
-function updateMockCardDisplay(val) {
-    const preview = document.getElementById('mockCardNumberPreview');
-    if (!preview) return;
-    const clean = val.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-    if (clean.length === 0) {
-        preview.textContent = '•••• •••• •••• ••••';
-        return;
-    }
-    const parts = clean.match(/.{1,4}/g) || [];
-    preview.textContent = parts.join(' ');
-}
-
-function switchMockPaymentTab(type) {
-    document.querySelectorAll('.payment-method-tab').forEach(t => t.classList.remove('active'));
-    if (type === 'card') document.getElementById('tabPayCard')?.classList.add('active');
-    else if (type === 'paypal') document.getElementById('tabPayPaypal')?.classList.add('active');
-    else if (type === 'skymiles') document.getElementById('tabPaySkymiles')?.classList.add('active');
-
-    renderMockPaymentContent(type);
-}
-
-async function executeMockPayment(event) {
-    if (event && event.preventDefault) event.preventDefault();
-    const btn = document.getElementById('btnExecuteMockPayment');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '🔄 Processing Payment...';
-    }
-
-    const { bookingId, pnr, amount, type } = activeMockPaymentState;
-    let paymentMethodName = 'Credit Card';
-    if (type === 'paypal') paymentMethodName = 'PayPal';
-    else if (type === 'skymiles') paymentMethodName = 'SkyMiles';
-
-    try {
-        const response = await apiRequest(`/bookings/${bookingId}/pay`, {
-            method: 'POST',
-            body: JSON.stringify({ 
-                payment_method: paymentMethodName,
-                payment_type: type
-            })
-        });
-
-        if (response.success) {
-            const cardEl = document.querySelector('.mock-payment-card');
-            if (cardEl) {
-                cardEl.innerHTML = `
-                    <div style="text-align: center; padding: 20px 10px;">
-                        <div style="font-size: 3rem; margin-bottom: 12px;">🎉</div>
-                        <h2 style="color: #34d399; font-size: 1.5rem; margin-bottom: 8px;">Payment Confirmed!</h2>
-                        <p style="color: #cbd5e1; font-size: 0.95rem; margin-bottom: 18px;">Your booking <strong>#${pnr}</strong> is now officially <span style="color: #34d399; font-weight: 800;">CONFIRMED</span> via <strong>${paymentMethodName}</strong> and E-Tickets have been issued.</p>
-                        <div style="background: rgba(15, 23, 42, 0.7); padding: 14px; border-radius: 12px; margin-bottom: 20px; font-size: 0.88rem; color: #94a3b8;">
-                            Amount Paid: <strong style="color: #f8fafc;">$${parseFloat(amount).toFixed(2)}</strong> &bull; Method: <strong style="color: #38bdf8;">${paymentMethodName}</strong> &bull; Status: <strong style="color: #34d399;">PAID</strong>
-                        </div>
-                        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                            <button class="btn btn-primary" onclick="window.location.href='my-bookings.html'" style="padding: 10px 20px; font-weight: 700;">View My Bookings</button>
-                            <button class="btn btn-secondary" onclick="closeMockPaymentModal(); if (typeof filterBookings === 'function') filterBookings('all', 'user'); if (typeof loadUserDashboardData === 'function') loadUserDashboardData();">Close</button>
-                        </div>
-                    </div>
-                `;
-            }
-        } else {
-            throw new Error(response.message || 'Payment processing failed');
-        }
-    } catch (error) {
-        alert('Payment failed: ' + error.message);
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = `💳 Pay Now & Confirm ($${parseFloat(amount).toFixed(2)})`;
-        }
-    }
-}
-
-function deferPaymentAsPending() {
-    const { pnr } = activeMockPaymentState;
-    closeMockPaymentModal();
-    alert(`⏳ Reservation Saved as PENDING!\n\nBooking Reference: ${pnr}\n\nYour flight reservation is saved in PENDING hold status. You can complete payment at any time from the "My Bookings" page.`);
-    if (window.location.pathname.includes('flight-search')) {
-        window.location.href = 'my-bookings.html';
-    } else if (typeof filterBookings === 'function') {
-        filterBookings('all', 'user');
-    }
-}
+// Demo payment UI lives in payments.js.
 
 async function triggerPayPendingBooking(bookingId) {
     try {
         const response = await apiRequest(`/bookings/${bookingId}`);
         if (response.success && response.data && response.data.booking) {
-            openMockPaymentModal(response.data.booking);
+            let booking = response.data.booking;
+            if (booking.itinerary_id) {
+                const journey = await apiRequest(`/itineraries/${booking.itinerary_id}`);
+                booking = { ...journey.data.itinerary, payment_target:`/itineraries/${booking.itinerary_id}/pay` };
+            }
+            await openMockPaymentModal(booking);
         } else {
             throw new Error(response.message || 'Failed to retrieve booking details');
         }
@@ -3428,22 +3005,22 @@ function showCheckInStatusCard({ type = 'info', icon = 'ℹ️', title = 'Check-
 
     if (seatSelection) seatSelection.style.display = 'none';
 
-    container.innerHTML = `
+    container.innerHTML = html`
         <div class="checkin-status-card ${type}">
             <div class="checkin-status-header">
                 <div class="checkin-status-icon">${icon}</div>
                 <div class="checkin-status-title">
                     <h2>${title}</h2>
-                    ${subtitle ? `<p>${subtitle}</p>` : ''}
+                    ${rawHtml(subtitle ? html`<p>${subtitle}</p>` : '')}
                 </div>
             </div>
             <div class="checkin-status-body">
-                ${message ? `<p style="margin: 0 0 10px 0; font-size: 1rem; color: #f8fafc;">${message}</p>` : ''}
-                ${detailsHtml || ''}
+                ${rawHtml(message ? html`<p style="margin: 0 0 10px 0; font-size: 1rem; color: #f8fafc;">${message}</p>` : '')}
+                ${rawHtml(detailsHtml || '')}
             </div>
             <div class="checkin-status-actions">
-                ${primaryAction ? `<button class="btn btn-primary" onclick="${primaryAction.onClick}">${primaryAction.text}</button>` : ''}
-                ${secondaryAction ? `<button class="btn btn-secondary" onclick="${secondaryAction.onClick}">${secondaryAction.text}</button>` : ''}
+                ${rawHtml(primaryAction ? html`<button class="btn btn-primary" onclick="${primaryAction.onClick}">${primaryAction.text}</button>` : '')}
+                ${rawHtml(secondaryAction ? html`<button class="btn btn-secondary" onclick="${secondaryAction.onClick}">${secondaryAction.text}</button>` : '')}
                 <button class="btn btn-secondary" onclick="dismissCheckInStatusCard()">🔍 Search Another Booking</button>
             </div>
         </div>
@@ -3507,8 +3084,8 @@ async function checkIn(bookingId) {
                     icon: '🕒',
                     title: 'Check-in Opens 24 Hours Before Departure',
                     subtitle: `Flight #${booking.flight_number} (${booking.from_code || ''} → ${booking.to_code || ''}) • Scheduled: ${formattedDep}`,
-                    message: `Online check-in is not yet open for this flight. Check-in opens exactly 24 hours prior to departure on <strong>${formattedOpens}</strong> (approx. <strong>${hoursWait} hours from now</strong>).`,
-                    detailsHtml: `
+                    message: html`Online check-in is not yet open for this flight. Check-in opens exactly 24 hours prior to departure on <strong>${formattedOpens}</strong> (approx. <strong>${hoursWait} hours from now</strong>).`,
+                    detailsHtml: html`
                         <div style="margin-top: 10px; padding: 10px 14px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; font-size: 0.88rem; color: #7dd3fc;">
                             ✈️ <strong>Pro Tip:</strong> Your seats and reservation are safely confirmed. Return to this page once the 24-hour window opens to choose your preferred seat and generate your digital boarding pass.
                         </div>
@@ -3520,17 +3097,14 @@ async function checkIn(bookingId) {
             }
             
             // Check if already checked in
-            const hasSeats = booking.passengers && Array.isArray(booking.passengers) && 
-                            booking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-            
-            if (hasSeats || (booking.status || '').toLowerCase() === 'checked_in' || (booking.status || '').toLowerCase() === 'boarded') {
+if (['checked_in', 'boarded', 'completed'].includes((booking.status || '').toLowerCase())) {
                 const seatList = (booking.passengers || []).map(p => `${p.first_name}: Seat ${p.seat_number || 'Assigned'}`).join(', ');
                 showCheckInStatusCard({
                     type: 'already-checked',
                     icon: '✅',
                     title: 'Check-in Already Completed',
                     subtitle: `Booking #${booking.booking_reference} • Flight #${booking.flight_number}`,
-                    message: `You are already checked in for this flight! Assigned seat(s): <strong>${seatList}</strong>.`,
+                    message: html`You are already checked in for this flight! Assigned seat(s): <strong>${seatList}</strong>.`,
                     primaryAction: { text: '🎫 View E-Ticket & Manifest', onClick: `viewBookingDetails(${booking.booking_id})` },
                     secondaryAction: { text: '📋 My Bookings', onClick: "window.location.href='my-bookings.html'" }
                 });
@@ -3629,7 +3203,7 @@ async function handleCheckInSearch(event) {
                 title: 'No Matching Reservation Found',
                 subtitle: `Reference: ${bookingRef} • Last Name: ${lastName}`,
                 message: msg || 'Please double-check your booking reference and ensure the passenger last name matches the ticket.',
-                detailsHtml: `
+                detailsHtml: html`
                     <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 0.88rem; color: #94a3b8;">
                         <li>Verify the 6-14 character Booking Reference from your confirmation email.</li>
                         <li>Ensure passenger last name is spelled identically to the reservation.</li>
@@ -3655,19 +3229,6 @@ async function handleCheckInSearch(event) {
             
             if (response.data.booking) {
                 currentBooking = response.data.booking;
-                
-                const hasSeats = currentBooking.passengers && currentBooking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-                if (hasSeats) {
-                    showCheckInStatusCard({
-                        type: 'already-checked',
-                        icon: '✅',
-                        title: 'Seats Already Assigned',
-                        subtitle: `Booking #${bookingRef}`,
-                        message: 'Seats have already been selected and confirmed for this booking.',
-                        primaryAction: { text: '📋 Go to My Bookings', onClick: "window.location.href='my-bookings.html'" }
-                    });
-                    return;
-                }
                 
                 maxSeatsAllowed = currentBooking.number_of_passengers || (currentBooking.passengers ? currentBooking.passengers.length : 1);
                 
@@ -3714,8 +3275,8 @@ async function loadBookingForCheckIn() {
                         icon: '🕒',
                         title: 'Check-in Opens 24 Hours Before Departure',
                         subtitle: `Flight #${booking.flight_number} • Departs: ${formattedDep}`,
-                        message: `Online check-in is not yet open. It will open on <strong>${formattedOpens}</strong> (${hoursWait} hours from now).`,
-                        detailsHtml: `
+                        message: html`Online check-in is not yet open. It will open on <strong>${formattedOpens}</strong> (${hoursWait} hours from now).`,
+                        detailsHtml: html`
                             <div style="margin-top: 10px; padding: 10px 14px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; font-size: 0.88rem; color: #7dd3fc;">
                                 ✈️ <strong>Notice:</strong> Seat selection opens 24 hours prior to departure. Please return then to complete check-in.
                             </div>
@@ -3738,8 +3299,7 @@ async function loadBookingForCheckIn() {
                     return;
                 }
                 
-                const hasSeats = booking.passengers && booking.passengers.some(p => p.seat_number && p.seat_number.trim() !== '');
-                if (hasSeats || (booking.status || '').toLowerCase() === 'checked_in') {
+                if (['checked_in', 'boarded', 'completed'].includes((booking.status || '').toLowerCase())) {
                     showCheckInStatusCard({
                         type: 'already-checked',
                         icon: '✅',
@@ -3773,139 +3333,8 @@ async function loadBookingForCheckIn() {
     }
 }
 
-let seatHoldTimerInterval = null;
-
-async function initializeSeatMap() {
-    const seatMap = document.getElementById('seatMap');
-    if (!seatMap || !currentBooking) return;
-    
-    selectedSeats = [];
-
-    if (seatHoldTimerInterval) {
-        clearInterval(seatHoldTimerInterval);
-        seatHoldTimerInterval = null;
-    }
-
-    try {
-        const response = await apiRequest(`/flights/${currentBooking.flight_id}/seat-map`);
-        const data = response.data || {};
-        const seats = data.seats || [];
-        const rows = Math.ceil((data.total_capacity || 30) / 6);
-        
-        const seatMapDict = new Map();
-        seats.forEach(s => seatMapDict.set(s.seat_number.toUpperCase(), s));
-
-        // Remove existing seat info if any
-        const existingInfo = document.querySelector('.seat-info');
-        if (existingInfo) existingInfo.remove();
-
-        let html = '';
-        let myHoldExpiresAt = null;
-
-        for (let row = 1; row <= rows; row++) {
-            html += '<div class="seat-row">';
-            for (let seatCol = 1; seatCol <= 6; seatCol++) {
-                if (seatCol === 4) {
-                    html += `<span class="seat-aisle-gap">${row}</span>`;
-                }
-                const seatId = `${row}${String.fromCharCode(64 + seatCol)}`;
-                const seatData = seatMapDict.get(seatId) || { status: 'AVAILABLE' };
-                
-                let cssClass = 'available';
-                let title = `Seat ${seatId} - Available`;
-
-                if (seatData.status === 'BOOKED') {
-                    cssClass = 'occupied';
-                    title = `Seat ${seatId} - Occupied`;
-                } else if (seatData.status === 'HELD') {
-                    if (seatData.mine) {
-                        cssClass = 'my-hold';
-                        title = `Seat ${seatId} - Your Hold`;
-                        myHoldExpiresAt = seatData.expires_at;
-                        if (!selectedSeats.includes(seatId)) selectedSeats.push(seatId);
-                    } else {
-                        cssClass = 'held';
-                        title = `Seat ${seatId} - Held by another passenger`;
-                    }
-                }
-
-                html += `<span class="seat ${cssClass}" 
-                         onclick="selectSeat(this)" data-seat="${seatId}"
-                         title="${title}">${seatId}</span>`;
-            }
-            html += '</div>';
-        }
-        seatMap.innerHTML = html;
-        
-        // Render seat info & dynamic countdown timer calculated from server expires_at
-        const seatInfo = document.createElement('div');
-        seatInfo.className = 'seat-info';
-        seatInfo.style.cssText = 'text-align: center; margin: 1rem 0; color: white; font-weight: 600;';
-        
-        if (myHoldExpiresAt) {
-            const updateTimer = () => {
-                const remSec = Math.max(0, Math.floor((new Date(myHoldExpiresAt) - new Date()) / 1000));
-                const mins = Math.floor(remSec / 60);
-                const secs = remSec % 60;
-                seatInfo.innerHTML = `⏱️ Seat Held! Remaining Time: <strong>${mins}:${secs < 10 ? '0' : ''}${secs}</strong> | Select up to ${maxSeatsAllowed} seat(s)`;
-                if (remSec === 0) {
-                    clearInterval(seatHoldTimerInterval);
-                    initializeSeatMap();
-                }
-            };
-            updateTimer();
-            seatHoldTimerInterval = setInterval(updateTimer, 1000);
-        } else {
-            seatInfo.innerHTML = `Select up to ${maxSeatsAllowed} seat(s) for ${maxSeatsAllowed} passenger(s)`;
-        }
-
-        seatMap.parentNode.insertBefore(seatInfo, seatMap.nextSibling);
-    } catch (error) {
-        console.error('Error initializing seat map:', error);
-        alert('Failed to load seat map. Please try again.');
-    }
-}
-
-function selectSeat(element) {
-    if (element.classList.contains('occupied')) {
-        alert('This seat is already occupied');
-        return;
-    }
-
-    const seatId = element.dataset.seat;
-
-    if (element.classList.contains('selected')) {
-        // Deselect seat
-        element.classList.remove('selected');
-        element.classList.add('available');
-        selectedSeats = selectedSeats.filter(seat => seat !== seatId);
-    } else {
-        // Check if max seats reached
-        if (selectedSeats.length >= maxSeatsAllowed) {
-            alert(`You can only select ${maxSeatsAllowed} seat(s) for ${maxSeatsAllowed} passenger(s).`);
-            return;
-        }
-        
-        // Select seat
-        element.classList.remove('available');
-        element.classList.add('selected');
-        if (!selectedSeats.includes(seatId)) {
-            selectedSeats.push(seatId);
-        }
-    }
-    
-    // Update seat count display
-    updateSeatCount();
-}
-
-function updateSeatCount() {
-    const seatInfo = document.querySelector('.seat-info');
-    if (seatInfo) {
-        seatInfo.innerHTML = `Selected: ${selectedSeats.length} / ${maxSeatsAllowed} seat(s)`;
-    }
-}
-
 async function confirmSeats() {
+    if (seatSelectionBusy) return;
     if (selectedSeats.length === 0) {
         alert('Please select at least one seat');
         return;
@@ -3916,6 +3345,9 @@ async function confirmSeats() {
         return;
     }
     
+    seatSelectionBusy = true;
+    const confirmButton = document.querySelector('button[onclick="confirmSeats()"]');
+    if (confirmButton) confirmButton.disabled = true;
     try {
         const response = await apiRequest('/checkin/confirm', {
             method: 'POST',
@@ -3930,6 +3362,9 @@ async function confirmSeats() {
             currentBooking.gate_number = response.data.gate_number || 'TBA';
             currentBooking.boarding_time = response.data.boarding_time;
             currentBooking.seats = selectedSeats;
+            const passResponse = await apiRequest(`/checkin/boarding-pass/${currentBooking.booking_id}`);
+            currentBooking = { ...currentBooking, ...passResponse.data.boardingPass };
+            clearInterval(seatHoldTimerInterval);
             
             document.getElementById('seatSelection').style.display = 'none';
             document.getElementById('checkinSuccess').style.display = 'block';
@@ -3977,86 +3412,31 @@ async function confirmSeats() {
         
         // Don't redirect to login for other errors - just show the error message
         alert(errorMsg);
+    } finally {
+        seatSelectionBusy = false;
+        if (confirmButton) confirmButton.disabled = false;
     }
 }
 
-function resetSeats() {
-    selectedSeats = [];
-    initializeSeatMap();
+async function resetSeats() {
+    if (seatSelectionBusy) return;
+    seatSelectionBusy = true;
+    try {
+        for (const hold of selectedSeatHolds.values()) await apiRequest(`/seat-holds/${hold.hold_id}`, { method: 'DELETE' });
+        selectedSeats = [];
+    } catch (error) {
+        alert(error.message || 'Unable to release selected seats. Please retry.');
+    } finally {
+        await initializeSeatMap();
+        seatSelectionBusy = false;
+    }
 }
 
 // ========== PREMIUM AIRLINE BOARDING PASS SYSTEM ==========
 
-// Generate high-density SVG Barcode (Code 128 / IATA BCBP style)
-function generateBarcodeSVG(text) {
-    const rawText = String(text || 'SKYWINGS2026').toUpperCase();
-    let bars = '';
-    let x = 12;
-    const patterns = [2, 1, 3, 1, 2, 4, 1, 3, 2, 1, 4, 2, 1, 2, 3, 1, 2, 1, 3, 4, 2, 1, 2, 3, 1, 4, 1, 2, 3, 2, 1, 3];
-    
-    // Guard bars
-    bars += `<rect x="4" y="2" width="2.5" height="44" fill="#0f172a" /><rect x="8" y="2" width="1.5" height="44" fill="#0f172a" />`;
-    
-    for (let i = 0; i < rawText.length * 3; i++) {
-        const charCode = rawText.charCodeAt(i % rawText.length) || 65;
-        const width = (charCode % 3) + 1.2;
-        const isSpace = (i % 2 === 1);
-        if (!isSpace) {
-            bars += `<rect x="${x.toFixed(1)}" y="4" width="${width.toFixed(1)}" height="40" fill="#0f172a" />`;
-        }
-        x += width + (isSpace ? (patterns[i % patterns.length] * 0.8) : 0.8);
-        if (x > 290) break;
-    }
-    
-    // Trailing guard bars
-    bars += `<rect x="295" y="2" width="1.5" height="44" fill="#0f172a" /><rect x="299" y="2" width="2.5" height="44" fill="#0f172a" />`;
-    
-    return `<svg class="bp-barcode-svg" viewBox="0 0 306 48" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" style="background:#ffffff; border-radius:6px; padding:3px 6px;">${bars}</svg>`;
-}
-
-// Generate realistic high-contrast vector QR Code SVG matrix
-function generateQRCodeSVG(dataString) {
-    const seed = String(dataString || 'SKYWINGS').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    const size = 21; // 21x21 QR matrix
-    const cellSize = 5;
-    let cells = '';
-
-    // Function to draw finder pattern
-    function drawFinder(startX, startY) {
-        cells += `<rect x="${startX * cellSize}" y="${startY * cellSize}" width="${7 * cellSize}" height="${7 * cellSize}" fill="#0f172a" />`;
-        cells += `<rect x="${(startX + 1) * cellSize}" y="${(startY + 1) * cellSize}" width="${5 * cellSize}" height="${5 * cellSize}" fill="#ffffff" />`;
-        cells += `<rect x="${(startX + 2) * cellSize}" y="${(startY + 2) * cellSize}" width="${3 * cellSize}" height="${3 * cellSize}" fill="#0f172a" />`;
-    }
-
-    // Draw 3 corner finder patterns
-    drawFinder(0, 0); // Top-left
-    drawFinder(size - 7, 0); // Top-right
-    drawFinder(0, size - 7); // Bottom-left
-
-    // Fill data cells
-    for (let r = 0; r < size; r++) {
-        for (let c = 0; c < size; c++) {
-            // Skip finder zones
-            if ((r < 8 && c < 8) || (r < 8 && c >= size - 8) || (r >= size - 8 && c < 8)) {
-                continue;
-            }
-            // Timing lines
-            if (r === 6 || c === 6) {
-                if ((r + c) % 2 === 0) {
-                    cells += `<rect x="${c * cellSize}" y="${r * cellSize}" width="${cellSize}" height="${cellSize}" fill="#0f172a" />`;
-                }
-                continue;
-            }
-            // Deterministic pseudo-random pattern based on string data seed
-            const val = Math.sin(seed * (r * size + c) + r * 13 + c * 37);
-            if (val > -0.1) {
-                cells += `<rect x="${c * cellSize}" y="${r * cellSize}" width="${cellSize}" height="${cellSize}" fill="#0f172a" />`;
-            }
-        }
-    }
-
-    const totalDim = size * cellSize;
-    return `<svg class="bp-qr-image" viewBox="0 0 ${totalDim} ${totalDim}" xmlns="http://www.w3.org/2000/svg" style="width:110px; height:110px; background:#ffffff; border-radius:8px;">${cells}</svg>`;
+function boardingCodeHTML(booking, passenger) {
+    if (!passenger.boarding_token || !passenger.passenger_id) return '<p>Boarding code unavailable. Refresh your pass.</p>';
+    return html`<img class="bp-qr-image" width="150" height="150" alt="Boarding QR code for this passenger" src="/api/checkin/boarding-code/${Number(booking.booking_id)}/${Number(passenger.passenger_id)}">`;
 }
 
 // Current active boarding pass state for multi-passenger bookings
@@ -4065,7 +3445,8 @@ let activeBoardingPassPaxIndex = 0;
 
 // Render Boarding Pass Card HTML
 function renderBoardingPassHTML(booking, activePaxIndex = 0, isModal = false) {
-    if (!booking) return '<div class="empty-state"><p>No boarding pass data available.</p></div>';
+    if (!booking || !['CHECKED_IN','BOARDED','COMPLETED'].includes(String(booking.status).toUpperCase())) return '<p>Complete check-in to receive a boarding pass.</p>';
+    if (!booking.passengers?.length) return '<p>Passenger information unavailable.</p>';
 
     activeBoardingPassBooking = booking;
     activeBoardingPassPaxIndex = activePaxIndex;
@@ -4099,7 +3480,7 @@ function renderBoardingPassHTML(booking, activePaxIndex = 0, isModal = false) {
     const currentPax = paxList[activePaxIndex] || paxList[0];
     const paxName = `${(currentPax.first_name || 'VALUED').toUpperCase()} ${(currentPax.last_name || 'PASSENGER').toUpperCase()}`;
     const seatNum = currentPax.seat_number || (selectedSeats && selectedSeats[activePaxIndex]) || (selectedSeats && selectedSeats[0]) || '10A';
-    const gateNum = booking.gate_number || 'A12';
+    const gateNum = booking.gate_number || 'TBA';
     const cabinClass = (booking.class || 'economy').toLowerCase();
     const pnr = booking.booking_reference || 'BKMSWT900';
     const flightNum = booking.flight_number || 'SW-1496';
@@ -4107,31 +3488,29 @@ function renderBoardingPassHTML(booking, activePaxIndex = 0, isModal = false) {
     const toCode = (booking.to_code || booking.to_airport_code || 'LON').toUpperCase();
     const fromCity = booking.from_city || booking.from_name || 'New York';
     const toCity = booking.to_city || booking.to_name || 'London';
-    const ticketNum = currentPax.ticket_number || `789-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-    const seqNum = String(activePaxIndex + 42).padStart(3, '0');
+    const ticketNum = currentPax.ticket_number || 'See issued e-ticket';
+    const seqNum = String(activePaxIndex + 1).padStart(3, '0');
     const groupZone = cabinClass === 'first' ? 'PRIORITY' : cabinClass === 'business' ? 'ZONE 1' : 'ZONE 2';
-
-    const mrtdString = `M1${paxName.replace(/ /g, '/')}  E${flightNum.replace('-', '')} ${fromCode}${toCode} ${cabinClass.charAt(0).toUpperCase()}${seatNum.padEnd(4, ' ')}${seqNum} 100`;
 
     // Multi-passenger tabs if more than 1 passenger
     let tabsHtml = '';
     if (paxList.length > 1) {
-        tabsHtml = `
+        tabsHtml = html`
             <div class="bp-passenger-tabs">
                 <span style="font-size: 0.85rem; font-weight: 700; color: #94a3b8; margin-right: 6px;">Passengers (${paxList.length}):</span>
-                ${paxList.map((p, idx) => `
+                ${rawHtml(paxList.map((p, idx) => html`
                     <button type="button" class="bp-passenger-tab ${idx === activePaxIndex ? 'active' : ''}" 
                             onclick="switchBoardingPassPassenger(${idx}, ${isModal})">
                         👤 ${p.first_name} ${p.last_name} (${p.seat_number || selectedSeats[idx] || `Seat ${idx + 1}`})
                     </button>
-                `).join('')}
+                `).join(''))}
             </div>
         `;
     }
 
-    return `
+    return html`
         <div class="boarding-pass-wrapper" id="boardingPassCardToExport">
-            ${tabsHtml}
+            ${rawHtml(tabsHtml)}
             
             <div class="premium-boarding-pass" id="printableBoardingPassCard">
                 <!-- Main Flight Coupon (Left Side) -->
@@ -4142,7 +3521,7 @@ function renderBoardingPassHTML(booking, activePaxIndex = 0, isModal = false) {
                             <img src="images/transparent_logo.PNG" alt="SkyWings Logo" class="bp-logo" onerror="this.style.display='none'">
                             <div class="bp-brand-text">
                                 <h3>✈️ SKYWINGS AIRLINES</h3>
-                                <span>Official Electronic Boarding Pass</span>
+                                <span>Demo Electronic Boarding Pass</span>
                             </div>
                         </div>
                         <div class="bp-badges">
@@ -4213,14 +3592,14 @@ function renderBoardingPassHTML(booking, activePaxIndex = 0, isModal = false) {
                     <!-- Footer Barcode & Security -->
                     <div class="bp-footer">
                         <div class="bp-barcode-container">
-                            ${generateBarcodeSVG(pnr + flightNum + seatNum)}
-                            <span class="bp-mrtd-string">${mrtdString}</span>
+                            <span>SkyWings demo boarding pass</span>
+                            <span class="bp-mrtd-string">${pnr}</span>
                         </div>
                         <div class="bp-security-badge">
                             <span class="shield-icon">🛡️</span>
                             <div class="bp-security-text">
-                                <strong>TSA PRE-CHECK / SKY SHIELD</strong>
-                                <span>IATA COMPLIANT BCBP VERIFIED</span>
+                                <strong>SKYWINGS BOARDING CODE</strong>
+                                <span>SERVER-ISSUED BOARDING CODE</span>
                             </div>
                         </div>
                     </div>
@@ -4270,7 +3649,7 @@ function renderBoardingPassHTML(booking, activePaxIndex = 0, isModal = false) {
 
                     <!-- High Density 2D QR Code -->
                     <div class="bp-qr-wrapper">
-                        ${generateQRCodeSVG(`SKYWINGS:${pnr}:${flightNum}:${paxName}:${seatNum}:${gateNum}`)}
+                        ${rawHtml(boardingCodeHTML(booking, currentPax))}
                         <span class="bp-qr-caption">SCAN AT GATE FOR BOARDING</span>
                     </div>
                 </div>
@@ -4485,7 +3864,7 @@ async function downloadBoardingPassPDF(customBooking = null, paxIndex = null) {
             doc.setFontSize(8);
             doc.setTextColor(148, 163, 184);
             doc.text(
-                'SkyWings Airlines • Official Electronic Boarding Pass • Please present this document along with government photo ID at security and departure gate.',
+                'SkyWings Airlines • Demonstration boarding pass • For testing the application boarding workflow.',
                 pageWidth / 2,
                 pageHeight - 6,
                 { align: 'center' }
@@ -4505,7 +3884,7 @@ async function downloadBoardingPassPDF(customBooking = null, paxIndex = null) {
 // Fallback Direct Vector PDF Generator
 function generateDirectVectorPDF(booking, pnr) {
     const jsPDFConstructor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-    if (!jsPDFConstructor) return;
+    if (!jsPDFConstructor) { alert('Unable to load PDF tools. Please retry or save the pass as an image.'); return; }
 
     const doc = new jsPDFConstructor({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -4514,12 +3893,14 @@ function generateDirectVectorPDF(booking, pnr) {
     const dep = new Date(booking.departure_datetime || Date.now());
     const arr = new Date(booking.arrival_datetime || Date.now());
     const boarding = booking.boarding_time ? new Date(booking.boarding_time) : new Date(dep.getTime() - 40 * 60 * 1000);
-    const fromCode = (booking.from_code || 'NYC').toUpperCase();
-    const toCode = (booking.to_code || 'LON').toUpperCase();
-    const flightNum = booking.flight_number || 'SW-1496';
-    const seat = (selectedSeats && selectedSeats[0]) || (booking.seats && booking.seats[0]) || '10A';
-    const gate = booking.gate_number || 'A12';
-    const paxName = authState.user ? `${authState.user.first_name} ${authState.user.last_name}` : 'VALUED PASSENGER';
+    const passenger = booking.passengers?.[activeBoardingPassPaxIndex] || booking.passengers?.[0];
+    if (!passenger?.boarding_token) { alert('Boarding code unavailable. Refresh your boarding pass before downloading.'); return; }
+    const fromCode = (booking.from_code || booking.from_airport_code || 'TBA').toUpperCase();
+    const toCode = (booking.to_code || booking.to_airport_code || 'TBA').toUpperCase();
+    const flightNum = booking.flight_number || 'TBA';
+    const seat = passenger.seat_number || 'TBA';
+    const gate = booking.gate_number || 'TBA';
+    const paxName = `${passenger.first_name} ${passenger.last_name}`;
 
     doc.setFillColor(9, 19, 34);
     doc.rect(0, 0, pageWidth, pageHeight, 'F');
@@ -4530,7 +3911,7 @@ function generateDirectVectorPDF(booking, pnr) {
 
     doc.setFontSize(14);
     doc.setTextColor(255, 255, 255);
-    doc.text('✈️ SKYWINGS AIRLINES — OFFICIAL ELECTRONIC BOARDING PASS', 18, 25);
+    doc.text('SKYWINGS AIRLINES - DEMO ELECTRONIC BOARDING PASS', 18, 25);
 
     // Card Body
     doc.setFillColor(19, 34, 56);
@@ -4552,9 +3933,14 @@ function generateDirectVectorPDF(booking, pnr) {
     doc.text(`CLASS: ${(booking.class || 'Economy').toUpperCase()}`, 150, 80);
     doc.text(`PNR: ${pnr}`, 150, 95);
 
+    doc.setFontSize(9);
+    doc.setTextColor(248, 250, 252);
+    doc.text('SERVER BOARDING TOKEN (gate staff can enter this code):', 20, 128);
+    doc.text(passenger.boarding_token, 20, 137);
+
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    doc.text('SkyWings Airlines • Gate closes 15 minutes prior to departure • IATA Compliant BCBP', pageWidth / 2, pageHeight - 8, { align: 'center' });
+    doc.text('SkyWings Airlines - Demonstration boarding pass', pageWidth / 2, pageHeight - 8, { align: 'center' });
 
     doc.save(`SkyWings_BoardingPass_${pnr}.pdf`);
     showBoardingPassToast('📥 Boarding Pass PDF downloaded successfully!');
@@ -4566,21 +3952,21 @@ async function viewBoardingPassModal(bookingId) {
     if (existing) existing.remove();
 
     try {
-        const response = await apiRequest(`/bookings/${bookingId}`);
-        if (!response.success || !response.data.booking) {
+        const response = await apiRequest(`/checkin/boarding-pass/${bookingId}`);
+        if (!response.success || !response.data.boardingPass) {
             alert('⚠️ Unable to load boarding pass for this booking.');
             return;
         }
 
-        const booking = response.data.booking;
+        const booking = response.data.boardingPass;
         const overlay = document.createElement('div');
         overlay.id = 'boardingPassModalOverlay';
         overlay.className = 'bp-modal-overlay';
-        overlay.innerHTML = `
+        overlay.innerHTML = html`
             <div class="bp-modal-content">
                 <button type="button" class="bp-modal-close-btn" onclick="document.getElementById('boardingPassModalOverlay').remove()" title="Close">✕</button>
                 <div id="bpModalDynamicContent">
-                    ${renderBoardingPassHTML(booking, 0, true)}
+                    ${rawHtml(renderBoardingPassHTML(booking, 0, true))}
                 </div>
             </div>
         `;
@@ -4852,7 +4238,9 @@ async function handlePasswordChange(event) {
         });
         
         if (response.success) {
-            alert('Password changed successfully! Please use your new password next time you log in.');
+            alert('Password changed. Please sign in again.');
+            clearClientAuth();
+            window.location.href = 'login.html';
             event.target.reset();
         } else {
             alert(response.message || 'Failed to change password');
@@ -4878,7 +4266,7 @@ async function loadBookingHistory() {
             const bookings = response.data.bookings;
             
             if (bookings.length === 0) {
-                historyList.innerHTML = `
+                historyList.innerHTML = html`
                     <div class="empty-state" style="text-align: center; padding: 2.5rem 1rem;">
                         <span style="font-size: 2.5rem; display: block; margin-bottom: 0.75rem;">🛫</span>
                         <p style="font-size: 1.1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem;">No Bookings Found</p>
@@ -4896,7 +4284,7 @@ async function loadBookingHistory() {
                     const isCheckedIn = booking.status === 'CHECKED_IN' || booking.status === 'checked_in';
                     const isConfirmed = booking.status === 'CONFIRMED' || booking.status === 'confirmed';
                     
-                    return `
+                    return html`
                         <div class="booking-history-card">
                             <div class="booking-history-header">
                                 <div class="route-badge-box">
@@ -4924,15 +4312,15 @@ async function loadBookingHistory() {
                             </div>
                             
                             <div class="booking-history-actions">
-                                ${isCheckedIn ? `
+                                ${rawHtml(isCheckedIn ? html`
                                     <button type="button" class="btn btn-sm btn-primary" onclick="viewBoardingPassFromBooking('${booking.booking_reference}')">
                                         🎫 View Boarding Pass
                                     </button>
-                                ` : isConfirmed ? `
+                                ` : isConfirmed ? html`
                                     <a href="check-in.html?ref=${booking.booking_reference}" class="btn btn-sm btn-primary">
                                         ✈️ Online Check-in
                                     </a>
-                                ` : ''}
+                                ` : '')}
                                 <a href="my-bookings.html" class="btn btn-sm btn-secondary">Manage Booking</a>
                             </div>
                         </div>
@@ -4957,7 +4345,7 @@ async function loadSavedPassengers() {
             const passengers = response.data.passengers;
             
             if (passengers.length === 0) {
-                passengersList.innerHTML = `
+                passengersList.innerHTML = html`
                     <div class="empty-state" style="text-align: center; padding: 2.5rem 1rem;">
                         <span style="font-size: 2.5rem; display: block; margin-bottom: 0.75rem;">👥</span>
                         <p style="font-size: 1.1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem;">No Saved Companions</p>
@@ -4966,12 +4354,12 @@ async function loadSavedPassengers() {
                     </div>
                 `;
             } else {
-                passengersList.innerHTML = `
+                passengersList.innerHTML = html`
                     <div class="companion-grid">
-                        ${passengers.map(p => {
+                        ${rawHtml(passengers.map(p => {
                             const initials = ((p.first_name?.[0] || '') + (p.last_name?.[0] || '')).toUpperCase() || 'P';
                             const dob = p.date_of_birth ? new Date(p.date_of_birth).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Not provided';
-                            return `
+                            return html`
                                 <div class="companion-card">
                                     <div class="companion-top">
                                         <div class="companion-avatar">${initials}</div>
@@ -4988,16 +4376,16 @@ async function loadSavedPassengers() {
                                             <span class="cd-label">DOB:</span>
                                             <span class="cd-val">${dob}</span>
                                         </div>
-                                        ${p.passport_number ? `
+                                        ${rawHtml(p.passport_number ? html`
                                             <div class="cd-row">
                                                 <span class="cd-label">Passport:</span>
                                                 <span class="cd-val" style="font-family: monospace; color: #38bdf8;">${p.passport_number}</span>
                                             </div>
-                                        ` : ''}
+                                        ` : '')}
                                     </div>
                                 </div>
                             `;
-                        }).join('')}
+                        }).join(''))}
                     </div>
                 `;
             }
@@ -5015,7 +4403,7 @@ function showAddPassengerModal() {
         modal.id = 'addPassengerModal';
         modal.className = 'modal';
         modal.style.display = 'none';
-        modal.innerHTML = `
+        modal.innerHTML = html`
             <div class="modal-content" style="max-width: 520px;">
                 <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                     <h2 style="font-size: 1.4rem; font-weight: 800; color: #ffffff; margin: 0;">Add Travel Companion</h2>
@@ -5502,7 +4890,7 @@ async function loadAdminFlights(page = 1, searchQuery = '') {
 
     } catch (error) {
         console.error('Error loading flights:', error);
-        const errHtml = `<tr><td colspan="6" style="text-align: center; color: red; padding: 20px;">⚠️ Error loading flights: ${error.message}</td></tr>`;
+        const errHtml = html`<tr><td colspan="6" style="text-align: center; color: red; padding: 20px;">⚠️ Error loading flights: ${error.message}</td></tr>`;
         if (upcomingTbody) upcomingTbody.innerHTML = errHtml;
         if (pastTbody) pastTbody.innerHTML = errHtml;
     }
@@ -5531,7 +4919,7 @@ function renderAdminFlightsUpcomingPage(page) {
         if (totalPages <= 1) {
             paginationContainer.innerHTML = '';
         } else {
-            paginationContainer.innerHTML = `
+            paginationContainer.innerHTML = html`
                 <span style="color: #94a3b8; font-size: 0.85rem; margin-right: 8px;">Page ${page} of ${totalPages} (${list.length} total)</span>
                 <button class="btn btn-sm btn-secondary" ${page <= 1 ? 'disabled' : ''} onclick="renderAdminFlightsUpcomingPage(${page - 1})">Previous</button>
                 <button class="btn btn-sm btn-secondary" ${page >= totalPages ? 'disabled' : ''} onclick="renderAdminFlightsUpcomingPage(${page + 1})">Next</button>
@@ -5563,7 +4951,7 @@ function renderAdminFlightsPastPage(page) {
         if (totalPages <= 1) {
             paginationContainer.innerHTML = '';
         } else {
-            paginationContainer.innerHTML = `
+            paginationContainer.innerHTML = html`
                 <span style="color: #94a3b8; font-size: 0.85rem; margin-right: 8px;">Page ${page} of ${totalPages} (${list.length} total)</span>
                 <button class="btn btn-sm btn-secondary" ${page <= 1 ? 'disabled' : ''} onclick="renderAdminFlightsPastPage(${page - 1})">Previous</button>
                 <button class="btn btn-sm btn-secondary" ${page >= totalPages ? 'disabled' : ''} onclick="renderAdminFlightsPastPage(${page + 1})">Next</button>
@@ -5583,7 +4971,7 @@ function renderFlightRowsHelper(flights, tbodyElement) {
         
         const tr = document.createElement('tr');
         tr.setAttribute('data-status', status);
-        tr.innerHTML = `
+        tr.innerHTML = html`
             <td><strong style="color: #cbd5e1;">${flight.flight_id}</strong></td>
             <td><strong style="color: #38bdf8; font-weight: 700;">${flight.flight_number}</strong><br><small style="color: #cbd5e1; font-size: 0.82rem;">${fromCity} → ${toCity}</small></td>
             <td><span style="color: #e2e8f0; font-size: 0.88rem;">${!isNaN(dep) ? dep.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span></td>
@@ -5618,14 +5006,14 @@ function updatePaginationControls() {
     
     if (paginationContainer && adminFlightsState.totalPages > 1) {
         let paginationHTML = '<div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">';
-        paginationHTML += `<span>Page ${adminFlightsState.currentPage} of ${adminFlightsState.totalPages}</span>`;
+        paginationHTML += html`<span>Page ${adminFlightsState.currentPage} of ${adminFlightsState.totalPages}</span>`;
         
         if (adminFlightsState.currentPage > 1) {
-            paginationHTML += `<button class="btn btn-sm" onclick="loadAdminFlights(${adminFlightsState.currentPage - 1})">Previous</button>`;
+            paginationHTML += html`<button class="btn btn-sm" onclick="loadAdminFlights(${adminFlightsState.currentPage - 1})">Previous</button>`;
         }
         
         if (adminFlightsState.currentPage < adminFlightsState.totalPages) {
-            paginationHTML += `<button class="btn btn-sm" onclick="loadAdminFlights(${adminFlightsState.currentPage + 1})">Next</button>`;
+            paginationHTML += html`<button class="btn btn-sm" onclick="loadAdminFlights(${adminFlightsState.currentPage + 1})">Next</button>`;
         }
         
         paginationHTML += '</div>';
@@ -5720,7 +5108,7 @@ async function loadAdminBookings() {
         }
     } catch (error) {
         console.error('Error loading admin bookings:', error);
-        const errHtml = `<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 25px;">⚠️ Database error: ${error.message}</td></tr>`;
+        const errHtml = html`<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 25px;">⚠️ Database error: ${error.message}</td></tr>`;
         if (upcomingTbody) upcomingTbody.innerHTML = errHtml;
         if (pastTbody) pastTbody.innerHTML = errHtml;
     }
@@ -5796,7 +5184,7 @@ function renderAdminBookingsUpcomingPage(page) {
         if (totalPages <= 1) {
             paginationContainer.innerHTML = '';
         } else {
-            paginationContainer.innerHTML = `
+            paginationContainer.innerHTML = html`
                 <span style="color: #94a3b8; font-size: 0.85rem; margin-right: 8px;">Page ${page} of ${totalPages} (${list.length} total)</span>
                 <button class="btn btn-sm btn-secondary" ${page <= 1 ? 'disabled' : ''} onclick="renderAdminBookingsUpcomingPage(${page - 1})">Previous</button>
                 <button class="btn btn-sm btn-secondary" ${page >= totalPages ? 'disabled' : ''} onclick="renderAdminBookingsUpcomingPage(${page + 1})">Next</button>
@@ -5828,7 +5216,7 @@ function renderAdminBookingsPastPage(page) {
         if (totalPages <= 1) {
             paginationContainer.innerHTML = '';
         } else {
-            paginationContainer.innerHTML = `
+            paginationContainer.innerHTML = html`
                 <span style="color: #94a3b8; font-size: 0.85rem; margin-right: 8px;">Page ${page} of ${totalPages} (${list.length} total)</span>
                 <button class="btn btn-sm btn-secondary" ${page <= 1 ? 'disabled' : ''} onclick="renderAdminBookingsPastPage(${page - 1})">Previous</button>
                 <button class="btn btn-sm btn-secondary" ${page >= totalPages ? 'disabled' : ''} onclick="renderAdminBookingsPastPage(${page + 1})">Next</button>
@@ -5865,9 +5253,7 @@ function createSingleBookingRow(booking) {
     const isFutureFlight = depDate && !isNaN(depDate) && depDate.getTime() > Date.now();
 
     let status = (booking.status || 'pending').toLowerCase();
-    if (status === 'completed') {
-        status = 'boarded';
-    }
+
 
     let badgeLabel = status.toUpperCase();
     if (status === 'boarded') badgeLabel = '✈️ BOARDED';
@@ -5881,23 +5267,23 @@ function createSingleBookingRow(booking) {
     // - Cancel: Allowed ONLY on future active confirmed/pending reservations
     // - Expired/Past/Missed/Boarded bookings: Render View only
     const canCancel = (status === 'confirmed' || status === 'pending' || status === 'checked_in') && isFutureFlight;
-    const canConfirm = (status === 'cancelled' || status === 'pending') && isFutureFlight;
-    const reasonTag = booking.state_change_reason ? `<br><small style="color: #94a3b8; font-size: 0.75rem;">(${booking.state_change_reason})</small>` : '';
+    const canConfirm = false;
+    const reasonTag = booking.state_change_reason ? html`<br><small style="color: #94a3b8; font-size: 0.75rem;">(${booking.state_change_reason})</small>` : '';
     
     const tr = document.createElement('tr');
     tr.setAttribute('data-status', status);
-    tr.innerHTML = `
+    tr.innerHTML = html`
         <td data-label="Booking Ref" style="text-align: left;"><strong style="color: #f8fafc; font-weight: 700; letter-spacing: 0.02em;">${booking.booking_reference || 'N/A'}</strong></td>
         <td data-label="User" style="text-align: left;"><span style="color: #f1f5f9; font-weight: 600;">${(booking.user_first_name || '')} ${(booking.user_last_name || '')}</span><br><small style="color: #94a3b8; font-size: 0.82rem;">${booking.user_email || 'No email'}</small></td>
         <td data-label="Flight" style="text-align: left;"><strong style="color: #38bdf8; font-weight: 600;">${booking.flight_number || 'N/A'}</strong><br><small style="color: #cbd5e1; font-size: 0.82rem;">${booking.from_code || ''} → ${booking.to_code || ''}</small></td>
         <td data-label="Departure Date" style="text-align: left;"><span style="color: #e2e8f0; font-size: 0.9rem;">${formattedDep}</span></td>
         <td data-label="Amount" style="text-align: right;"><strong style="color: #34d399; font-size: 0.95rem;">$${parseFloat(booking.total_amount || 0).toFixed(2)}</strong></td>
-        <td data-label="Status" style="text-align: center;"><span class="status-badge status-${status}">${badgeLabel}</span>${reasonTag}</td>
+        <td data-label="Status" style="text-align: center;"><span class="status-badge status-${status}">${badgeLabel}</span>${rawHtml(reasonTag)}</td>
         <td data-label="Actions" style="text-align: right;">
             <div class="action-btn-group" style="display: flex; gap: 6px; align-items: center; justify-content: flex-end;">
                 <button class="btn btn-sm btn-secondary" onclick="viewBookingDetails(${booking.booking_id})">View</button>
-                ${canConfirm ? `<button class="btn btn-sm btn-success" style="background: #059669; color: #fff; border: none; font-size: 0.78rem; padding: 4px 8px; border-radius: 6px;" onclick="adminConfirmBooking(${booking.booking_id})">Rebook & Confirm</button>` : ''}
-                ${canCancel ? `<button class="btn btn-sm btn-danger" onclick="adminCancelBooking(${booking.booking_id})">Cancel</button>` : ''}
+                ${rawHtml(canConfirm ? html`<button class="btn btn-sm btn-success" style="background: #059669; color: #fff; border: none; font-size: 0.78rem; padding: 4px 8px; border-radius: 6px;" onclick="adminConfirmBooking(${booking.booking_id})">Rebook & Confirm</button>` : '')}
+                ${rawHtml(canCancel ? html`<button class="btn btn-sm btn-danger" onclick="adminCancelBooking(${booking.booking_id})">Cancel</button>` : '')}
             </div>
         </td>
     `;
@@ -5941,7 +5327,7 @@ function renderBookingRowsHelper(bookings, tbodyElement) {
 
             const headerTr = document.createElement('tr');
             headerTr.className = 'flight-group-header-row';
-            headerTr.innerHTML = `
+            headerTr.innerHTML = html`
                 <td colspan="7" style="padding: 9px 14px; background: linear-gradient(90deg, rgba(2, 132, 199, 0.28), rgba(15, 23, 42, 0.9)); border-top: 2px solid rgba(56, 189, 248, 0.45); border-bottom: 1px solid rgba(56, 189, 248, 0.18);">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -6013,7 +5399,7 @@ async function loadAdminUsers() {
                 
                 users.forEach(user => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `
+                    tr.innerHTML = html`
                         <td>${user.user_id || 'N/A'}</td>
                         <td>${(user.first_name || '')} ${(user.last_name || '')}</td>
                         <td>${user.email || 'N/A'}</td>
@@ -6036,7 +5422,7 @@ async function loadAdminUsers() {
         }
     } catch (error) {
         console.error('Error loading users:', error);
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: red; padding: 20px;">Error loading users: ${error.message}</td></tr>`;
+        tbody.innerHTML = html`<tr><td colspan="7" style="text-align: center; color: red; padding: 20px;">Error loading users: ${error.message}</td></tr>`;
     }
 }
 
@@ -6105,50 +5491,50 @@ function showDetailsModal({ title, subtitle, badgeText, badgeClass, detailsGrid,
 
     let gridHtml = '';
     if (detailsGrid && Array.isArray(detailsGrid)) {
-        gridHtml = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px;">`;
+        gridHtml = html`<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px;">`;
         detailsGrid.forEach(item => {
-            gridHtml += `
+            gridHtml += html`
                 <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 12px 14px;">
                     <div style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">${item.label}</div>
                     <div style="font-size: 0.98rem; color: #f8fafc; font-weight: 600; margin-top: 4px; word-break: break-word;">${item.value}</div>
                 </div>
             `;
         });
-        gridHtml += `</div>`;
+        gridHtml += html`</div>`;
     }
 
     let passengersHtml = '';
     if (passengers && Array.isArray(passengers) && passengers.length > 0) {
-        passengersHtml = `
+        passengersHtml = html`
             <div style="margin-top: 16px; margin-bottom: 20px;">
                 <h4 style="color: #cbd5e1; font-size: 0.85rem; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.04em;">Passenger Manifest (${passengers.length})</h4>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
         `;
         passengers.forEach((p, idx) => {
-            passengersHtml += `
+            passengersHtml += html`
                 <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
                     <span style="color: #f1f5f9; font-weight: 600; font-size: 0.9rem;">👤 Passenger ${idx + 1}: ${p.first_name || ''} ${p.last_name || ''}</span>
                     <span style="color: #38bdf8; font-size: 0.85rem; font-weight: 600;">${p.seat_number ? 'Seat ' + p.seat_number : 'Unassigned Seat'}</span>
                 </div>
             `;
         });
-        passengersHtml += `</div></div>`;
+        passengersHtml += html`</div></div>`;
     }
 
-    modalEl.innerHTML = `
+    modalEl.innerHTML = html`
         <div style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.96)); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 35px rgba(56, 189, 248, 0.18); width: 100%; max-width: 650px; max-height: 90vh; overflow-y: auto; padding: 28px; position: relative;">
             <div style="display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.12); padding-bottom: 16px; margin-bottom: 20px;">
                 <div>
                     <h3 style="color: #f8fafc; font-size: 1.35rem; font-weight: 800; margin: 0; letter-spacing: -0.01em;">${title || 'Details'}</h3>
-                    ${subtitle ? `<p style="color: #94a3b8; font-size: 0.88rem; margin: 4px 0 0 0;">${subtitle}</p>` : ''}
+                    ${rawHtml(subtitle ? html`<p style="color: #94a3b8; font-size: 0.88rem; margin: 4px 0 0 0;">${subtitle}</p>` : '')}
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
-                    ${badgeText ? `<span class="status-badge status-${(badgeClass || 'confirmed').toLowerCase()}">${badgeText}</span>` : ''}
+                    ${rawHtml(badgeText ? html`<span class="status-badge status-${(badgeClass || 'confirmed').toLowerCase()}">${badgeText}</span>` : '')}
                     <button id="closeSkywingsModalBtn" style="background: rgba(255, 255, 255, 0.1); border: none; color: #f8fafc; font-size: 1.5rem; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s;">&times;</button>
                 </div>
             </div>
-            ${gridHtml}
-            ${passengersHtml}
+            ${rawHtml(gridHtml)}
+            ${rawHtml(passengersHtml)}
             <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid rgba(255, 255, 255, 0.12); padding-top: 16px; margin-top: 10px;">
                 <button id="closeSkywingsModalBottomBtn" class="btn btn-secondary" style="padding: 8px 22px; font-weight: 600;">Close</button>
             </div>
@@ -6186,9 +5572,7 @@ async function viewBookingDetails(bookingId) {
             const formattedArr = !isNaN(arr) ? arr.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
             
             let status = (booking.status || 'CONFIRMED').toUpperCase();
-            if (status === 'COMPLETED') {
-                status = 'BOARDED';
-            }
+
 
             let badgeText = status;
             if (status === 'BOARDED') badgeText = '✈️ BOARDED';
@@ -6382,7 +5766,7 @@ async function loadAdminAircraft() {
                 
                 aircraft.forEach(ac => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `
+                    tr.innerHTML = html`
                         <td>${ac.aircraft_id || 'N/A'}</td>
                         <td><strong>${ac.model || 'N/A'}</strong></td>
                         <td><code>${ac.registration || 'N/A'}</code></td>
@@ -6404,7 +5788,7 @@ async function loadAdminAircraft() {
         }
     } catch (error) {
         console.error('Error loading aircraft:', error);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: red; padding: 20px;">Error loading aircraft: ${error.message}</td></tr>`;
+        tbody.innerHTML = html`<tr><td colspan="6" style="text-align: center; color: red; padding: 20px;">Error loading aircraft: ${error.message}</td></tr>`;
     }
 }
 
@@ -6566,7 +5950,7 @@ async function loadAdminAirports(searchQuery = '') {
                 const tr = document.createElement('tr');
                 const flightCount = parseInt(airport.linked_flights_count) || 0;
                 
-                tr.innerHTML = `
+                tr.innerHTML = html`
                     <td>
                         <span style="display: inline-block; padding: 4px 10px; border-radius: 8px; font-weight: 800; font-family: monospace; font-size: 0.95rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">
                             ${airport.airport_code}
@@ -6596,7 +5980,7 @@ async function loadAdminAirports(searchQuery = '') {
         }
     } catch (error) {
         console.error('Error loading admin airports:', error);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #ef4444; padding: 20px;">Error loading airports: ${error.message}</td></tr>`;
+        tbody.innerHTML = html`<tr><td colspan="6" style="text-align: center; color: #ef4444; padding: 20px;">Error loading airports: ${error.message}</td></tr>`;
     }
 }
 
@@ -6912,7 +6296,7 @@ function renderBarChart(containerId, data) {
         const value = item.value || 0;
         const height = maxValue > 0 ? Math.max((value / maxValue) * 100, 5) : 5; // Minimum 5% height
         const displayValue = typeof value === 'number' ? value.toLocaleString() : value;
-        return `
+        return html`
             <div class="chart-bar" style="height: ${height}%;" 
                  data-value="${item.label}: ${displayValue}" 
                  title="${item.label}: ${displayValue}">
@@ -6951,16 +6335,16 @@ function renderLineChart(containerId, data) {
         pathD += ` L ${points[i].x}% ${points[i].y}%`;
     }
     
-    container.innerHTML = `
+    container.innerHTML = html`
         <svg class="chart-line-svg" viewBox="0 0 100 100" preserveAspectRatio="none" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
             <path d="${pathD}" class="chart-line-path" fill="none"/>
         </svg>
         <div class="chart-line-points">
-            ${points.map((point, index) => `
+            ${rawHtml(points.map((point, index) => html`
                 <div class="chart-line-point" style="left: ${point.x}%; bottom: ${point.y}%;" 
                      title="${point.label}: ${point.value.toLocaleString()}">
                 </div>
-            `).join('')}
+            `).join(''))}
         </div>
     `;
 }
@@ -6981,7 +6365,7 @@ async function loadOverviewReport() {
             if (revenueSummary) {
                 const totalRev = data.revenue?.total || data.totalRevenue || 0;
                 const monthlyRev = data.revenue?.monthly || data.monthlyRevenue || 0;
-                revenueSummary.innerHTML = `
+                revenueSummary.innerHTML = html`
                     <p>Total Revenue: $${totalRev.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     <p>This Month: $${monthlyRev.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 `;
@@ -6999,7 +6383,7 @@ async function loadOverviewReport() {
             if (bookingSummary) {
                 const totalBk = data.bookings?.total || data.totalBookings || 0;
                 const monthlyBk = data.bookings?.monthly || data.monthlyBookings || 0;
-                bookingSummary.innerHTML = `
+                bookingSummary.innerHTML = html`
                     <p>Total Bookings: ${totalBk.toLocaleString()}</p>
                     <p>This Month: ${monthlyBk.toLocaleString()}</p>
                 `;
@@ -7016,7 +6400,7 @@ async function loadOverviewReport() {
             const routesList = document.querySelector('#overviewTab .report-card:nth-child(3) .routes-list');
             if (routesList) {
                 if (data.popularRoutes && data.popularRoutes.length > 0) {
-                    routesList.innerHTML = data.popularRoutes.map(route => `
+                    routesList.innerHTML = data.popularRoutes.map(route => html`
                         <div class="route-item">
                             <span>${route.route}</span>
                             <span class="route-count">${route.booking_count} bookings</span>
@@ -7030,10 +6414,10 @@ async function loadOverviewReport() {
             // Update performance
             const performanceList = document.querySelector('#overviewTab .report-card:nth-child(4) .performance-list');
             if (performanceList && data.performance) {
-                performanceList.innerHTML = `
+                performanceList.innerHTML = html`
                     <div class="performance-item">
                         <span>On-Time Rate</span>
-                        <span class="performance-value">${data.performance.onTimeRate}%</span>
+                        <span class="performance-value">${data.performance.onTimeRate === null ? 'Unavailable' : data.performance.onTimeRate + '%'}</span>
                     </div>
                     <div class="performance-item">
                         <span>Occupancy Rate</span>
@@ -7041,7 +6425,7 @@ async function loadOverviewReport() {
                     </div>
                     <div class="performance-item">
                         <span>Customer Satisfaction</span>
-                        <span class="performance-value">${data.performance.customerSatisfaction}/5</span>
+                        <span class="performance-value">${data.performance.customerSatisfaction === null ? 'No ratings recorded' : data.performance.customerSatisfaction + '/5'}</span>
                     </div>
                 `;
             }
@@ -7082,7 +6466,7 @@ async function loadRevenueReport() {
             const routesList = document.querySelector('#revenueTab .report-card:nth-child(3) .routes-list');
             if (routesList) {
                 if (data.revenueByRoute && data.revenueByRoute.length > 0) {
-                    routesList.innerHTML = data.revenueByRoute.map(route => `
+                    routesList.innerHTML = data.revenueByRoute.map(route => html`
                         <div class="route-item">
                             <span>${route.route}</span>
                             <span class="route-count">$${parseFloat(route.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -7097,18 +6481,11 @@ async function loadRevenueReport() {
             const growthEl = document.getElementById('revenueTrendSummary');
             if (growthEl) {
                 const sign = data.growth >= 0 ? '+' : '';
-                growthEl.innerHTML = `<p>Growth: ${sign}${data.growth || 0}% this month</p>`;
+                growthEl.innerHTML = data.growth === null ? '<p>Growth unavailable: no previous-month revenue.</p>' : html`<p>Growth: ${sign}${data.growth || 0}% this month</p>`;
             }
             
             // Render revenue trend line chart (simulated 6 months)
-            renderLineChart('revenueTrendLine', [
-                { month: 'Jan', value: data.monthlyRevenue * 0.8 },
-                { month: 'Feb', value: data.monthlyRevenue * 0.85 },
-                { month: 'Mar', value: data.monthlyRevenue * 0.9 },
-                { month: 'Apr', value: data.monthlyRevenue * 0.95 },
-                { month: 'May', value: data.monthlyRevenue * 1.0 },
-                { month: 'Jun', value: data.monthlyRevenue * 1.05 }
-            ]);
+            renderLineChart('revenueTrendLine', (data.revenueTrend || []).map(item => ({ month: item.month, value: Number(item.revenue) })));
         }
     } catch (error) {
         console.error('Error loading revenue report:', error);
@@ -7143,7 +6520,7 @@ async function loadBookingsReport() {
                 if (data.bookingStatus.length > 0) {
                     statusList.innerHTML = data.bookingStatus.map(status => {
                         const percentage = total > 0 ? ((status.count / total) * 100).toFixed(0) : 0;
-                        return `
+                        return html`
                             <div class="performance-item">
                                 <span>${status.status.charAt(0).toUpperCase() + status.status.slice(1)}</span>
                                 <span class="performance-value">${status.count} (${percentage}%)</span>
@@ -7159,18 +6536,11 @@ async function loadBookingsReport() {
             const growthEl = document.getElementById('bookingTrendSummary');
             if (growthEl) {
                 const sign = data.growth >= 0 ? '+' : '';
-                growthEl.innerHTML = `<p>Growth: ${sign}${data.growth || 0}% this month</p>`;
+                growthEl.innerHTML = html`<p>Growth: ${sign}${data.growth || 0}% this month</p>`;
             }
             
             // Render booking trend line chart (simulated 6 months)
-            renderLineChart('bookingTrendLine', [
-                { month: 'Jan', value: data.monthlyBookings * 0.8 },
-                { month: 'Feb', value: data.monthlyBookings * 0.85 },
-                { month: 'Mar', value: data.monthlyBookings * 0.9 },
-                { month: 'Apr', value: data.monthlyBookings * 0.95 },
-                { month: 'May', value: data.monthlyBookings * 1.0 },
-                { month: 'Jun', value: data.monthlyBookings * 1.05 }
-            ]);
+            renderLineChart('bookingTrendLine', (data.bookingTrend || []).map(item => ({ month: item.month, value: Number(item.count) })));
 
             // Update Bookings Grouped by Flight Table
             const flightBookingsTbody = document.querySelector('#reportBookingsByFlightTable tbody');
@@ -7179,7 +6549,7 @@ async function loadBookingsReport() {
                     flightBookingsTbody.innerHTML = data.bookingsByFlight.map(bf => {
                         const dep = bf.departure_datetime ? new Date(bf.departure_datetime) : null;
                         const formattedDep = dep && !isNaN(dep) ? dep.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
-                        return `
+                        return html`
                             <tr>
                                 <td><span style="font-weight: 800; color: #38bdf8;">✈️ ${bf.flight_number}</span></td>
                                 <td><strong>${bf.from_city} → ${bf.to_city}</strong></td>
@@ -7214,7 +6584,7 @@ async function loadRoutesReport() {
             const popularRoutesList = document.querySelector('#routesTab .report-card:nth-child(1) .routes-list');
             if (popularRoutesList) {
                 if (data.popularRoutes && data.popularRoutes.length > 0) {
-                    popularRoutesList.innerHTML = data.popularRoutes.map(route => `
+                    popularRoutesList.innerHTML = data.popularRoutes.map(route => html`
                         <div class="route-item">
                             <span>${route.route}</span>
                             <span class="route-count">${route.booking_count} bookings</span>
@@ -7229,7 +6599,7 @@ async function loadRoutesReport() {
             const performanceList = document.querySelector('#routesTab .report-card:nth-child(2) .performance-list');
             if (performanceList) {
                 if (data.routePerformance && data.routePerformance.length > 0) {
-                    performanceList.innerHTML = data.routePerformance.map(route => `
+                    performanceList.innerHTML = data.routePerformance.map(route => html`
                         <div class="performance-item">
                             <span>${route.route}</span>
                             <span class="performance-value">Avg: $${parseFloat(route.avg_price).toFixed(2)}</span>
@@ -7244,7 +6614,7 @@ async function loadRoutesReport() {
             const revenueList = document.querySelector('#routesTab .report-card:nth-child(3) .routes-list');
             if (revenueList) {
                 if (data.routeRevenue && data.routeRevenue.length > 0) {
-                    revenueList.innerHTML = data.routeRevenue.map(route => `
+                    revenueList.innerHTML = data.routeRevenue.map(route => html`
                         <div class="route-item">
                             <span>${route.route}</span>
                             <span class="route-count">$${parseFloat(route.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -7272,11 +6642,11 @@ async function loadPerformanceReport() {
             // Update on-time performance
             const onTimeEl = document.querySelector('#performanceTab .report-card:nth-child(1) .report-summary p');
             if (onTimeEl) {
-                onTimeEl.textContent = `${data.onTimePerformance.rate}%`;
+                onTimeEl.textContent = data.onTimePerformance.rate === null ? 'Unavailable' : `${data.onTimePerformance.rate}%`;
             }
             const onTimeList = document.querySelector('#performanceTab .report-card:nth-child(1) .performance-list');
             if (onTimeList) {
-                onTimeList.innerHTML = `
+                onTimeList.innerHTML = html`
                     <div class="performance-item">
                         <span>On-Time</span>
                         <span class="performance-value">${data.onTimePerformance.onTime} flights</span>
@@ -7295,7 +6665,7 @@ async function loadPerformanceReport() {
             }
             const occupancyList = document.querySelector('#performanceTab .report-card:nth-child(2) .performance-list');
             if (occupancyList) {
-                occupancyList.innerHTML = `
+                occupancyList.innerHTML = html`
                     <div class="performance-item">
                         <span>Booked Seats</span>
                         <span class="performance-value">${data.occupancy.booked.toLocaleString()}</span>
@@ -7310,14 +6680,14 @@ async function loadPerformanceReport() {
             // Update customer satisfaction
             const satisfactionEl = document.querySelector('#performanceTab .report-card:nth-child(3) .report-summary p');
             if (satisfactionEl) {
-                satisfactionEl.textContent = `${data.customerSatisfaction.average}/5`;
+                satisfactionEl.textContent = data.customerSatisfaction.average === null ? 'No ratings recorded' : `${data.customerSatisfaction.average}/5`;
             }
             const satisfactionList = document.querySelector('#performanceTab .report-card:nth-child(3) .performance-list');
             if (satisfactionList) {
                 const total = data.customerSatisfaction.breakdown.fiveStars + 
                              data.customerSatisfaction.breakdown.fourStars + 
                              data.customerSatisfaction.breakdown.threeStars;
-                satisfactionList.innerHTML = `
+                satisfactionList.innerHTML = data.customerSatisfaction.available === false ? '<p>No customer ratings recorded.</p>' : html`
                     <div class="performance-item">
                         <span>5 Stars</span>
                         <span class="performance-value">${data.customerSatisfaction.breakdown.fiveStars} (${total > 0 ? Math.round((data.customerSatisfaction.breakdown.fiveStars / total) * 100) : 0}%)</span>
@@ -7336,18 +6706,18 @@ async function loadPerformanceReport() {
             // Update efficiency
             const efficiencyList = document.querySelector('#performanceTab .report-card:nth-child(4) .performance-list');
             if (efficiencyList) {
-                efficiencyList.innerHTML = `
+                efficiencyList.innerHTML = html`
                     <div class="performance-item">
                         <span>Average Flight Time</span>
                         <span class="performance-value">${data.efficiency.avgFlightTime}</span>
                     </div>
                     <div class="performance-item">
                         <span>Fuel Efficiency</span>
-                        <span class="performance-value">${data.efficiency.fuelEfficiency}%</span>
+                        <span class="performance-value">${data.efficiency.fuelEfficiency === null ? 'Unavailable' : data.efficiency.fuelEfficiency + '%'}</span>
                     </div>
                     <div class="performance-item">
                         <span>Maintenance Score</span>
-                        <span class="performance-value">${data.efficiency.maintenanceScore}%</span>
+                        <span class="performance-value">${data.efficiency.maintenanceScore === null ? 'Unavailable' : data.efficiency.maintenanceScore + '%'}</span>
                     </div>
                 `;
             }
@@ -7499,10 +6869,10 @@ async function handleStatusSearch(event) {
     if (!statusResult) return;
     
     statusResult.style.display = 'block';
-    statusResult.innerHTML = `
+    statusResult.innerHTML = html`
         <div class="live-tracker-card" style="text-align: center; padding: 2rem;">
             <div style="font-size: 2rem; animation: spin 1s infinite linear; display: inline-block; margin-bottom: 0.75rem;">📡</div>
-            <p style="color: #94a3b8; margin: 0;">Querying SkyWings Air Traffic Control Radar for <strong>${flightNumber}</strong>...</p>
+            <p style="color: #94a3b8; margin: 0;">Checking the recorded flight status for <strong>${flightNumber}</strong>...</p>
         </div>
     `;
     
@@ -7521,24 +6891,24 @@ async function handleStatusSearch(event) {
             if (flight.status === 'cancelled') {
                 statusBadge = '🔴 CANCELLED';
                 badgeClass = 'cancelled';
-            } else if (flight.status === 'completed' || arrival < now) {
+            } else if (flight.status === 'completed') {
                 statusBadge = '🏁 ARRIVED / COMPLETED';
                 badgeClass = 'completed';
             } else if (flight.status === 'boarding') {
                 statusBadge = '🟡 BOARDING NOW';
                 badgeClass = 'pending';
-            } else if (departure < now && arrival > now) {
+            } else if (flight.status === 'in_air') {
                 statusBadge = '🔵 EN ROUTE (IN FLIGHT)';
                 badgeClass = 'checked_in';
             }
             
             const fromCode = flight.from_code || flight.from_airport_code || flight.from_city?.substring(0, 3)?.toUpperCase() || 'ORG';
             const toCode = flight.to_code || flight.to_airport_code || flight.to_city?.substring(0, 3)?.toUpperCase() || 'DST';
-            const aircraft = flight.aircraft_model || 'Boeing 787-9 Dreamliner';
-            const gate = flight.gate || 'Gate B14';
-            const terminal = flight.terminal || 'Terminal 2';
+            const aircraft = flight.aircraft_model || 'Aircraft unassigned';
+            const gate = flight.gate || 'Gate TBA';
+            const terminal = flight.terminal || 'Terminal TBA';
             
-            statusResult.innerHTML = `
+            statusResult.innerHTML = html`
                 <div class="live-tracker-card">
                     <div class="tracker-header">
                         <div>
@@ -7593,7 +6963,7 @@ async function handleStatusSearch(event) {
                 </div>
             `;
         } else {
-            statusResult.innerHTML = `
+            statusResult.innerHTML = html`
                 <div class="live-tracker-card" style="border-color: rgba(239, 68, 68, 0.4);">
                     <h3 style="color: #f87171; margin-bottom: 0.5rem;">🔍 No Flight Found for "${flightNumber}"</h3>
                     <p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">Please check the flight number (e.g. FL101, SW202) and verify scheduled departure date.</p>
@@ -7601,10 +6971,10 @@ async function handleStatusSearch(event) {
             `;
         }
     } catch (error) {
-        statusResult.innerHTML = `
+        statusResult.innerHTML = html`
             <div class="live-tracker-card" style="border-color: rgba(239, 68, 68, 0.4);">
-                <h3 style="color: #f87171; margin-bottom: 0.5rem;">⚠️ Radar Connection Error</h3>
-                <p style="color: #cbd5e1; margin: 0;">${error.message || 'Failed to fetch flight radar telemetry.'}</p>
+                <h3 style="color: #f87171; margin-bottom: 0.5rem;">⚠️ Flight status unavailable</h3>
+                <p style="color: #cbd5e1; margin: 0;">${error.message || 'Unable to retrieve the recorded flight status.'}</p>
             </div>
         `;
     }
@@ -7612,37 +6982,24 @@ async function handleStatusSearch(event) {
 
 // ========== CONTACT & FAQ INTERACTIVITY ==========
 
-function handleContactSubmit(event) {
+async function handleContactSubmit(event) {
     event.preventDefault();
     const form = event.target;
-    const submitBtn = form.querySelector('.contact-submit-btn');
-    const successBanner = form.querySelector('.contact-success-banner') || document.getElementById('contactSuccessBanner');
-
-    const originalText = submitBtn ? submitBtn.innerHTML : 'Send Message';
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '⏳ Transmitting message...';
-    }
-
-    setTimeout(() => {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
+    const button = form.querySelector('.contact-submit-btn');
+    const banner = document.getElementById('contactSuccessBanner');
+    if (button.disabled) return;
+    button.disabled = true;
+    if (banner) banner.style.display = 'none';
+    try {
+        const data = new FormData(form);
+        const response = await apiRequest('/contact', { method: 'POST', body: JSON.stringify(Object.fromEntries(data)) });
+        if (banner) {
+            banner.textContent = 'Message saved for our support team. Reference: ' + response.data.message_id;
+            banner.style.display = 'block';
         }
-
-        if (successBanner) {
-            successBanner.style.display = 'block';
-            successBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-
         form.reset();
-
-        setTimeout(() => {
-            if (successBanner) {
-                successBanner.style.display = 'none';
-            }
-        }, 8000);
-    }, 600);
+    } catch (error) { alert(error.message); }
+    finally { button.disabled = false; }
 }
 
 function toggleFaq(headerElement) {
@@ -7671,4 +7028,16 @@ window.onclick = function(event) {
     if (event.target === modal) {
         closeModal();
     }
+}
+
+async function handleGateScan(event) {
+    event.preventDefault();
+    const form = event.target, button = form.querySelector('button[type="submit"]'), result = document.getElementById('gateScanResult');
+    button.disabled = true;
+    try {
+        const data = new FormData(form);
+        const response = await apiRequest('/boarding/scan', { method: 'POST', body: JSON.stringify({ flight_id: Number(data.get('flight_id')), boarding_token: data.get('boarding_token').trim() }) });
+        result.textContent = response.data.all_boarded ? 'All passengers on this booking have boarded.' : 'Passenger boarding recorded; other passengers are still awaiting boarding.';
+    } catch (error) { result.textContent = error.message; }
+    finally { button.disabled = false; }
 }

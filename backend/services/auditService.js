@@ -41,7 +41,8 @@ const AUDIT_ACTIONS = {
 const SENSITIVE_KEYS = new Set([
   'password', 'passwordhash', 'token', 'accesstoken', 'refreshtoken', 
   'jwt', 'authorization', 'cookie', 'secret', 'apikey', 
-  'creditcard', 'cardnumber', 'cvv', 'auth_token', 'authtoken'
+  'creditcard', 'cardnumber', 'cvv', 'auth_token', 'authtoken',
+  'currentpassword', 'newpassword', 'confirmpassword', 'boarding_token', 'boardingtoken'
 ]);
 
 class AuditService {

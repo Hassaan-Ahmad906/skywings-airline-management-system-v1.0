@@ -5,15 +5,41 @@ class BookingRepository {
    * Count every passenger holding capacity on a flight. A booking holds capacity
    * from confirmation onward, including before a seat is selected at check-in.
    */
-  async countCapacityReserved(connection, flightId) {
+  async countCapacityReserved(connection, flightId, cabinClass = null, excludeBookingId = null) {
     const [rows] = await connection.execute(
       `SELECT COALESCE(SUM(number_of_passengers), 0) AS reserved_seats
        FROM bookings
-       WHERE flight_id = ? AND status IN ('pending', 'confirmed')`,
-      [flightId]
+       WHERE flight_id = ?
+         AND (status IN ('CONFIRMED', 'CHECKED_IN', 'BOARDED')
+              OR (status = 'PENDING' AND (reservation_expires_at IS NULL OR reservation_expires_at > NOW())))
+         AND (? IS NULL OR class = ?)
+         AND (? IS NULL OR booking_id <> ?)`,
+      [flightId, cabinClass, cabinClass, excludeBookingId, excludeBookingId]
     );
 
     return Number(rows[0]?.reserved_seats || 0);
+  }
+
+  async assertCapacity(connection, flight, cabinClass, passengerCount, excludeBookingId = null, convertingSeats = []) {
+    const total = await this.countCapacityReserved(connection, flight.flight_id, null, excludeBookingId);
+    const cabin = await this.countCapacityReserved(connection, flight.flight_id, cabinClass, excludeBookingId);
+    const [seats] = await connection.execute(
+      'SELECT COUNT(*) AS capacity FROM seats WHERE aircraft_id = ? AND seat_class = ? AND is_available = 1',
+      [flight.aircraft_id, cabinClass]
+    );
+    const [holds] = await connection.execute(
+      `SELECT h.seat_number, s.seat_class FROM seat_holds h JOIN seats s ON s.aircraft_id = ? AND s.seat_number = h.seat_number
+       WHERE h.flight_id = ? AND h.status = 'HELD' AND h.expires_at > NOW() AND h.booking_id IS NULL`, [flight.aircraft_id, flight.flight_id]
+    );
+    const otherHolds = holds.filter(hold => !convertingSeats.includes(hold.seat_number));
+    const available = Math.min(Number(flight.capacity) - total - otherHolds.length,
+      Number(seats[0].capacity) - cabin - otherHolds.filter(hold => hold.seat_class === cabinClass).length);
+    if (available < passengerCount) {
+      const error = new Error(`Not enough ${cabinClass} seats available. Only ${Math.max(0, available)} remain.`);
+      error.status = 409;
+      error.code = 'CAPACITY_EXCEEDED';
+      throw error;
+    }
   }
 
   /**
@@ -40,19 +66,19 @@ class BookingRepository {
       class: flightClass, 
       total_amount, 
       idempotency_key = null,
-      status = 'CONFIRMED',
-      payment_status = 'paid',
-      payment_method = 'Credit Card'
+      status = 'PENDING',
+      payment_status = 'pending',
+      payment_method = null
     } = bookingData;
     
-    const initialStatus = (status || 'CONFIRMED').toUpperCase();
-    const initialPayment = (payment_status || 'paid').toLowerCase();
+    const initialStatus = (status || 'PENDING').toUpperCase();
+    const initialPayment = (payment_status || 'pending').toLowerCase();
 
     const [result] = await connection.execute(
       `INSERT INTO bookings (
         booking_reference, user_id, flight_id, number_of_passengers, 
-        class, total_amount, status, payment_status, payment_method, idempotency_key
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        class, total_amount, status, payment_status, payment_method, idempotency_key, reservation_expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
       [booking_reference, user_id, flight_id, number_of_passengers, flightClass, total_amount, initialStatus, initialPayment, payment_method, idempotency_key || null]
     );
     
@@ -64,6 +90,26 @@ class BookingRepository {
    */
   async addPassengerToBooking(connection, bookingId, userId, passengerData) {
     let passengerId = passengerData.passenger_id;
+
+    if (passengerId !== undefined && passengerId !== null) {
+      passengerId = Number(passengerId);
+      if (!Number.isSafeInteger(passengerId) || passengerId < 1) {
+        const error = new Error('Passenger ID must be a positive integer.');
+        error.status = 400;
+        error.code = 'INVALID_PASSENGER_ID';
+        throw error;
+      }
+      const [ownedPassengers] = await connection.execute(
+        'SELECT passenger_id FROM passengers WHERE passenger_id = ? AND user_id = ? FOR UPDATE',
+        [passengerId, userId]
+      );
+      if (ownedPassengers.length === 0) {
+        const error = new Error('The selected passenger is not available to this account.');
+        error.status = 403;
+        error.code = 'PASSENGER_ACCESS_DENIED';
+        throw error;
+      }
+    }
 
     if (!passengerId) {
       const [passengerResult] = await connection.execute(

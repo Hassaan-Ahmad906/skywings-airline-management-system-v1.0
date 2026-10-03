@@ -1,13 +1,25 @@
 const express = require('express');
 const { query } = require('../config/database');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // ========== SEARCH FLIGHTS ==========
+router.get('/itinerary-search', async (req, res) => {
+  let legs;
+  try { legs = JSON.parse(req.query.legs || 'null'); } catch { return res.status(400).json({ success:false, message:'Invalid flight legs' }); }
+  const data = await require('../services/journeySearchService').search(legs, req.query.trip_type || 'oneway', req.query.class || 'economy', req.query.passengers || 1);
+  res.json({ success:true, data });
+});
 router.get('/search', async (req, res) => {
   try {
     const { from, to, departure, return: returnDate, passengers = 1, class: flightClass = 'economy' } = req.query;
 
+    if (returnDate) return res.status(400).json({ success: false, message: 'Search one-way flights; book the return journey separately.' });
+    if (!['economy','business','first'].includes(flightClass) || !Number.isInteger(Number(passengers)) || Number(passengers) < 1 || Number(passengers) > 9 ||
+      [from,to].some(code => code && !/^[A-Z]{3}$/.test(code)) || (from && from === to) ||
+      (departure && (!/^\d{4}-\d{2}-\d{2}$/.test(departure) || !Number.isFinite(new Date(departure+'T00:00:00Z').getTime()) || new Date(departure+'T00:00:00Z').toISOString().slice(0,10) !== departure))) {
+      return res.status(400).json({ success: false, message: 'Provide valid airports, date, cabin, and 1?9 passengers.' });
+    }
     let sql = `
       SELECT 
         f.flight_id,
@@ -35,22 +47,16 @@ router.get('/search', async (req, res) => {
           WHEN ? = 'first' THEN f.first_class_price
           ELSE f.base_price
         END as price,
-        GREATEST(
-          0,
-          COALESCE(a.capacity, 150) - GREATEST(
-            COALESCE((SELECT SUM(b.number_of_passengers) FROM bookings b WHERE b.flight_id = f.flight_id AND b.status IN ('CONFIRMED', 'CHECKED_IN', 'BOARDED', 'PENDING')), 0),
-            COALESCE((SELECT COUNT(*) FROM flight_seat_allocations fsa WHERE fsa.flight_id = f.flight_id), 0)
-          )
-        ) as available_seats
+        ${require('../repositories/inventorySql')} as available_seats
       FROM flights f
       INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
       INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
-      WHERE f.status IN ('scheduled', 'boarding')
+      WHERE f.status IN ('scheduled', 'boarding', 'delayed') AND a.status = 'active'
         AND f.departure_datetime > CURRENT_TIMESTAMP
     `;
 
-    const params = [flightClass, flightClass, flightClass];
+    const params = Array(6).fill(flightClass);
 
     if (from) {
       sql += ' AND f.from_airport_code = ?';
@@ -67,11 +73,13 @@ router.get('/search', async (req, res) => {
       params.push(departure);
     }
 
-    sql += ' ORDER BY f.departure_datetime ASC';
+    sql += ' HAVING available_seats >= ? ORDER BY f.departure_datetime ASC LIMIT 200';
+    params.push(Number(passengers));
 
     const flights = await query(sql, params);
 
     for (let flight of flights) {
+      flight.available_seats = Number(flight.available_seats);
       flight.total_price = parseFloat(flight.price) * parseInt(passengers);
     }
 

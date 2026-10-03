@@ -35,20 +35,29 @@ app.use((req, res, next) => {
 
 // Middleware
 app.use(auditMiddleware);
-app.use(cors({
+app.use(require('./middleware/safeErrors'));
+app.use(cors((req, optionsCallback) => {
+  optionsCallback(null, {
   origin(origin, callback) {
-    // Requests without an Origin header include same-origin navigation and health checks.
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    const sameOrigin = `${req.protocol}://${req.get('host')}`;
+    if (!origin || origin === sameOrigin || allowedOrigins.has(origin)) return callback(null, true);
     const error = new Error('CORS origin is not allowed');
     error.status = 403;
     return callback(error);
   },
   credentials: true
+  });
 }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 // parse cookies for server-side session handling
 app.use(cookieParser());
+const rateLimit = require('./middleware/rateLimit');
+app.use('/api/auth/login', rateLimit());
+app.use('/api/auth/register', rateLimit({ limit: 10 }));
+app.use('/api/contact', (req, res, next) => req.method === 'POST' ? contactLimit(req, res, next) : next());
+const contactLimit = rateLimit({ limit: 10, windowMs: 3600000 });
+app.use('/api/seat-holds', rateLimit({ limit: 120, windowMs: 300000 }));
 
 // Static frontend path
 const frontendPath = path.join(__dirname, '../frontend');
@@ -77,10 +86,12 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/seat-holds', require('./routes/seatHolds'));
 app.use('/api/tickets', require('./routes/tickets'));
+app.use('/api/contact', require('./routes/contact'));
+app.use('/api/itineraries', require('./routes/itineraries'));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'SkyWings API is running' });
+  res.json({ status: 'ok', message: 'SkyWings API is running', demo: require('./services/paymentService').demoEnabled() });
 });
 
 // Serve HTML files from frontend
@@ -101,47 +112,28 @@ app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    message: err.status && err.status < 500 ? err.message : 'Internal server error'
   });
 });
 
-// Start server after database connection is verified
-db.pool.getConnection()
-  .then(connection => {
-    console.log('✅ Database connected successfully');
-    connection.release();
-    
-    // Start background seat hold expiration cleaner
-    seatHoldCleaner.start(60000);
-    
-    // Start HTTP server on the correct port (not MySQL port 3306)
-    const server = app.listen(PORT, () => {
-      console.log(`🚀 SkyWings Airlines server running on http://localhost:${PORT}`);
-      console.log(`📊 API endpoints available at http://localhost:${PORT}/api`);
-      console.log(`🌐 Access the application at http://localhost:${PORT}`);
+async function startServer(port = PORT) {
+  const connection = await db.pool.getConnection();
+  connection.release();
+  await require('./services/productionGuard').verify(db.pool);
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
+      if (process.env.NODE_ENV !== 'test') seatHoldCleaner.start(60000);
+      console.log('SkyWings server running on port ' + server.address().port);
+      resolve(server);
     });
-    
-    // Handle server errors
-    server.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(`❌ Port ${PORT} is already in use.`);
-        console.error(`   Please stop the other process or change PORT in .env file`);
-        console.error(`   Note: PORT should be for HTTP server (e.g., 3000), not MySQL port (3306)`);
-      } else {
-        console.error('❌ Server error:', err.message);
-      }
-      process.exit(1);
-    });
-  })
-  .catch(err => {
-    console.error('❌ Failed to connect to database:', err.message);
-    console.error('Please ensure:');
-    console.error('  1. MySQL Server is running (not XAMPP MySQL)');
-    console.error('  2. Database credentials are correct in .env file');
-    console.error('  3. Database "skywings_airlines" exists');
-    console.error('\nTo test connection: node scripts/test_mysql_connection.js');
-    process.exit(1);
+    server.once('error', reject);
   });
-
+}
+if (require.main === module) startServer().catch(async error => {
+  console.error('Server startup failed:', error.code || error.message);
+  seatHoldCleaner.stop();
+  await db.pool.end();
+  process.exitCode = 1;
+});
 module.exports = app;
+module.exports.startServer = startServer;

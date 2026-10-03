@@ -19,7 +19,7 @@ class FlightRepository {
        FROM flights f
        INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
        WHERE f.flight_id = ?
-         AND LOWER(f.status) IN ('scheduled', 'boarding', 'in_air', 'active')
+         AND LOWER(f.status) IN ('scheduled', 'boarding', 'delayed')
          AND f.departure_datetime > CURRENT_TIMESTAMP
        FOR UPDATE`,
       [flightClass, flightClass, flightClass, flightId]
@@ -32,7 +32,7 @@ class FlightRepository {
    * Get flight details without lock
    */
   async findById(flightId) {
-    const [rows] = await query(
+    const rows = await query(
       `SELECT f.*, a.capacity, a.model as aircraft_model
        FROM flights f
        INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id

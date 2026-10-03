@@ -46,12 +46,12 @@ class SeatHoldRepository {
   /**
    * Find all active holds for a session and user
    */
-  async findActiveHoldsBySession(connection, sessionId, userId) {
+  async findActiveHoldsBySession(connection, sessionId, userId, flightId) {
     const [rows] = await connection.execute(
       `SELECT * FROM seat_holds 
-       WHERE session_id = ? AND user_id = ? AND status = 'HELD' AND expires_at > CURRENT_TIMESTAMP 
+       WHERE session_id = ? AND user_id = ? AND flight_id = ? AND status = 'HELD' AND expires_at > CURRENT_TIMESTAMP
        FOR UPDATE`,
-      [sessionId, userId]
+      [sessionId, userId, flightId]
     );
     return rows;
   }
@@ -67,11 +67,18 @@ class SeatHoldRepository {
       `SELECT bp.seat_number 
        FROM booking_passengers bp 
        INNER JOIN bookings b ON bp.booking_id = b.booking_id 
-       WHERE b.flight_id = ? AND b.status != 'cancelled' AND UPPER(bp.seat_number) = UPPER(?)`,
+       WHERE b.flight_id = ? AND b.status IN ('PENDING','CONFIRMED','CHECKED_IN','BOARDED')
+       AND (b.status <> 'PENDING' OR b.reservation_expires_at IS NULL OR b.reservation_expires_at > NOW())
+       AND UPPER(bp.seat_number) = UPPER(?)`,
       [flightId, seatNumber]
     );
 
     if (bookedRows.length > 0) return true;
+    const [allocations] = await connection.execute(
+      `SELECT allocation_id FROM flight_seat_allocations WHERE flight_id = ? AND seat_number = ?
+       AND (status = 'confirmed' OR expires_at > NOW())`, [flightId, seatNumber]
+    );
+    if (allocations.length) return true;
 
     // 2. Check active unexpired holds
     let holdSql = `SELECT hold_id FROM seat_holds WHERE flight_id = ? AND UPPER(seat_number) = UPPER(?) AND status = 'HELD' AND expires_at > CURRENT_TIMESTAMP`;
@@ -89,10 +96,17 @@ class SeatHoldRepository {
   /**
    * Create or update temporary seat hold for a passenger index
    */
-  async createOrUpdateHold(connection, { flightId, seatNumber, userId, sessionId, passengerIndex, durationMinutes = 10 }) {
+  async createOrUpdateHold(connection, { flightId, seatNumber, userId, sessionId, passengerIndex, durationMinutes = 10, bookingId = null }) {
     await this.cleanupExpiredHolds(connection, flightId);
 
     const seatUpper = seatNumber.trim().toUpperCase();
+
+    const [ownHold] = await connection.execute(
+      `SELECT * FROM seat_holds WHERE flight_id = ? AND seat_number = ? AND user_id = ?
+       AND session_id = ? AND passenger_index = ? AND status = 'HELD' AND expires_at > NOW() FOR UPDATE`,
+      [flightId, seatUpper, userId, sessionId, passengerIndex]
+    );
+    if (ownHold.length) return ownHold[0];
 
     // Check if the requested seat is occupied
     const occupied = await this.isSeatOccupied(connection, flightId, seatUpper);
@@ -107,18 +121,18 @@ class SeatHoldRepository {
     await connection.execute(
       `UPDATE seat_holds 
        SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP 
-       WHERE flight_id = ? AND session_id = ? AND passenger_index = ? AND status = 'HELD'`,
-      [flightId, sessionId, passengerIndex]
+       WHERE flight_id = ? AND user_id = ? AND session_id = ? AND passenger_index = ? AND status = 'HELD'`,
+      [flightId, userId, sessionId, passengerIndex]
     );
 
     // Insert new HELD record
     try {
       const [result] = await connection.execute(
         `INSERT INTO seat_holds (
-          flight_id, seat_number, user_id, session_id, passenger_index, 
+          flight_id, seat_number, user_id, session_id, passenger_index, booking_id,
           status, expires_at
-        ) VALUES (?, ?, ?, ?, ?, 'HELD', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ? MINUTE))`,
-        [flightId, seatUpper, userId, sessionId, passengerIndex, durationMinutes]
+        ) VALUES (?, ?, ?, ?, ?, ?, 'HELD', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ? MINUTE))`,
+        [flightId, seatUpper, userId, sessionId, passengerIndex, bookingId, durationMinutes]
       );
 
       const [holdRows] = await connection.execute(
@@ -175,12 +189,12 @@ class SeatHoldRepository {
   /**
    * Mark all active holds in session as CONSUMED upon successful booking
    */
-  async markHoldsConsumed(connection, sessionId, userId) {
+  async markHoldsConsumed(connection, sessionId, userId, flightId) {
     await connection.execute(
       `UPDATE seat_holds 
        SET status = 'CONSUMED', updated_at = CURRENT_TIMESTAMP 
-       WHERE session_id = ? AND user_id = ? AND status = 'HELD'`,
-      [sessionId, userId]
+       WHERE session_id = ? AND user_id = ? AND flight_id = ? AND status = 'HELD'`,
+      [sessionId, userId, flightId]
     );
   }
 

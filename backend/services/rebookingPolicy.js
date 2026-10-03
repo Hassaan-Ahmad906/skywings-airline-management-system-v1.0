@@ -26,7 +26,7 @@ class RebookingPolicy {
       throw error;
     }
 
-    if (['BOARDED', 'COMPLETED', 'EXPIRED'].includes(status)) {
+    if (!['CONFIRMED','CHECKED_IN','CANCELLED'].includes(status) || booking.payment_status !== 'paid') {
       const error = new Error(`Bookings in state ${status} are strictly ineligible for rebooking.`);
       error.code = 'INELIGIBLE_BOOKING_STATE';
       error.status = 400;
@@ -34,6 +34,7 @@ class RebookingPolicy {
     }
 
     if (status === 'CANCELLED') {
+      if (actor?.role !== 'admin') throw Object.assign(new Error('Contact support to transfer a cancelled paid booking; refunded reservations require a new booking.'), { status: 409, code: 'CANCELLED_REBOOKING_NOT_ALLOWED' });
       const isDisruptionRebooking = ['FLIGHT_CANCELLED', 'FLIGHT_DELAYED', 'SCHEDULE_CHANGE', 'AIRCRAFT_CHANGE', 'OPERATIONAL_OVERRIDE'].includes(reasonType);
       if (!isDisruptionRebooking) {
         const error = new Error('Cancelled bookings can only be rebooked if cancellation was caused by a flight disruption or operational override.');
@@ -54,6 +55,7 @@ class RebookingPolicy {
       throw error;
     }
 
+    if (booking.itinerary_id) throw Object.assign(new Error('Changing a linked journey requires reviewing all flight legs together; individual leg rebooking is unavailable.'), { status:409, code:'JOURNEY_CHANGE_REVIEW_REQUIRED' });
     return true;
   }
 
@@ -82,6 +84,10 @@ class RebookingPolicy {
       error.code = 'SAME_FLIGHT_REBOOKING';
       error.status = 400;
       throw error;
+    }
+
+    if (booking.from_airport_code && (booking.from_airport_code !== targetFlight.from_airport_code || booking.to_airport_code !== targetFlight.to_airport_code)) {
+      throw Object.assign(new Error('Rebooking must preserve the original route'), { status: 400, code: 'ROUTE_MISMATCH' });
     }
 
     return true;

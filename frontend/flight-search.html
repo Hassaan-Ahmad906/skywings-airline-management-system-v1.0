@@ -8,6 +8,7 @@
     <link rel="shortcut icon" type="image/png" href="images/transparent_logo_clean.PNG">
     <link rel="apple-touch-icon" href="images/transparent_logo_clean.PNG">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/operations.css">
 </head>
 <body>
     <!-- Navigation -->
@@ -50,11 +51,11 @@
                     } catch (e) {}
                 })();
             </script>
-            <div class="hamburger">
+            <button type="button" class="hamburger" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navMenu">
                 <span></span>
                 <span></span>
                 <span></span>
-            </div>
+            </button>
         </div>
     </nav>
 
@@ -76,12 +77,8 @@
         <!-- Search Tab -->
         <div id="searchTab" class="tab-content">
             <div class="search-panel">
-                <!-- Trip Type Pills -->
-                <div class="trip-type-selector">
-                    <button type="button" class="trip-pill active" onclick="setTripType(this, 'round')">✈️ Round Trip</button>
-                    <button type="button" class="trip-pill" onclick="setTripType(this, 'oneway')">➡️ One Way</button>
-                    <!-- <button type="button" class="trip-pill" onclick="setTripType(this, 'multicity')">🔀 Multi-City</button> -->
-                </div>
+                <div class="journey-tabs" role="group" aria-label="Trip type"><button type="button" aria-pressed="true" data-trip-type="oneway" onclick="setJourneyType('oneway')">One-way</button><button type="button" aria-pressed="false" data-trip-type="return" onclick="setJourneyType('return')">Return</button><button type="button" aria-pressed="false" data-trip-type="multicity" onclick="setJourneyType('multicity')">Multi-city</button></div>
+                <p class="search-note">Compare available flights and select a flight for each leg. Fares are shown in USD.</p>
 
                 <form class="search-form detailed" id="flightSearchForm" onsubmit="handleFlightSearch(event)">
                     <!-- Route Selection with Swap Button -->
@@ -112,19 +109,17 @@
                             <label for="searchDepDate">📅 Departure Date</label>
                             <input type="date" name="departure" id="searchDepDate" required>
                         </div>
-                        <div class="form-group flex-1" id="returnDateFieldGroup">
-                            <label for="searchReturnDate">📅 Return Date (Optional)</label>
-                            <input type="date" name="return" id="searchReturnDate">
-                        </div>
+                        <div class="form-group flex-1" id="journeyReturnGroup" hidden><label for="searchReturnDate">Return date</label><input type="date" id="searchReturnDate" disabled></div>
                     </div>
+                    <div id="multiCityLegs" class="journey-controls" hidden></div><button type="button" id="addJourneyLegButton" class="btn btn-secondary" onclick="addJourneyLeg()" hidden>+ Add flight leg</button>
 
                     <!-- Quick Date Chips Bar -->
                     <div class="quick-date-chips-bar">
                         <span class="chips-label">Quick Departures:</span>
-                        <span class="date-chip" onclick="setQuickDate('today')">📅 Today</span>
-                        <span class="date-chip" onclick="setQuickDate('tomorrow')">📅 Tomorrow</span>
-                        <span class="date-chip" onclick="setQuickDate('weekend')">🌴 This Weekend</span>
-                        <span class="date-chip" onclick="setQuickDate('plus3')">✨ +3 Days</span>
+                        <button type="button" class="date-chip" onclick="setQuickDate('today')">📅 Today</button>
+                        <button type="button" class="date-chip" onclick="setQuickDate('tomorrow')">📅 Tomorrow</button>
+                        <button type="button" class="date-chip" onclick="setQuickDate('weekend')">🌴 This Weekend</button>
+                        <button type="button" class="date-chip" onclick="setQuickDate('plus3')">✨ +3 Days</button>
                     </div>
                     
                     <!-- Passengers & Cabin Class -->
@@ -137,6 +132,7 @@
                                 <option value="3">3 Passengers</option>
                                 <option value="4">4 Passengers</option>
                                 <option value="5">5 Passengers</option>
+                                <option value="6">6 Passengers</option><option value="7">7 Passengers</option><option value="8">8 Passengers</option><option value="9">9 Passengers</option>
                             </select>
                         </div>
                         <div class="form-group flex-1">
@@ -161,7 +157,7 @@
                 <div class="results-header-bar">
                     <div>
                         <h2 id="searchResultsTitle" style="margin: 0; font-size: 1.4rem; color: #f8fafc;">Available Flights</h2>
-                        <p id="searchResultsSubtitle" style="margin: 4px 0 0 0; color: #94a3b8; font-size: 0.88rem;">Real-time scheduled departures with instant confirmation</p>
+                        <p id="searchResultsSubtitle" style="margin: 4px 0 0 0; color: #94a3b8; font-size: 0.88rem;">Scheduled departures and current seat availability</p>
                     </div>
                     <div class="sort-controls">
                         <span style="font-size: 0.82rem; color: #94a3b8; font-weight: 700;">Sort By:</span>
@@ -171,9 +167,12 @@
                     </div>
                 </div>
 
+                <div class="ops-toolbar journey-controls"><label class="ops-field">Departure time<select id="journeyTimeFilter" onchange="renderJourneyResults()"><option value="all">Any time</option><option value="0-6">Midnight – 6 AM</option><option value="6-12">6 AM – Noon</option><option value="12-18">Noon – 6 PM</option><option value="18-24">6 PM – Midnight</option></select></label><label class="ops-field">Maximum total fare per leg (USD)<input id="journeyFareFilter" type="number" min="0" step="10" placeholder="No limit" onchange="renderJourneyResults()"></label></div>
                 <div class="flights-list" id="flightsList">
                     <!-- Flight results will be populated dynamically -->
                 </div>
+                <div id="journeySummary" class="journey-summary" hidden></div>
+                <p id="journeySearchStatus" class="ops-notice" role="status"></p>
             </div>
         </div>
 
@@ -181,7 +180,7 @@
         <div id="statusTab" class="tab-content" style="display: none;">
             <div class="search-panel">
                 <div style="margin-bottom: 1.5rem;">
-                    <h2 style="font-size: 1.35rem; color: #f8fafc; margin: 0 0 4px 0;">Live Flight Radar & Tracker</h2>
+                    <h2 style="font-size: 1.35rem; color: #f8fafc; margin: 0 0 4px 0;">Flight schedule and recorded status</h2>
                     <p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">Track real-time departures, arrivals, terminal gates, and baggage status.</p>
                 </div>
                 <form class="search-form" onsubmit="handleStatusSearch(event)">
@@ -222,7 +221,12 @@
         </div>
     </div>
 
+    <script src="js/html.js"></script>
+    <script src="js/payments.js"></script>
+    <script src="js/seat-map.js"></script>
+    <script src="js/accessibility.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/journey-search.js"></script>
 </body>
 </html>
 

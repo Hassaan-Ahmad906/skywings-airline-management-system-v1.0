@@ -5,6 +5,10 @@ class DisruptionNotificationWorker {
    * Process pending notification queue out of transaction
    */
   async processPendingNotifications(limit = 20) {
+    const webhook = process.env.DISRUPTION_NOTIFICATION_WEBHOOK_URL;
+    if (process.env.NOTIFICATIONS_ENABLED !== 'true' || !webhook || process.env.NODE_ENV === 'test') {
+      return { processed: 0, sent: 0, failed: 0, disabled: true };
+    }
     try {
       const pendingItems = await disruptionRepository.getPendingNotifications(null, limit);
       if (pendingItems.length === 0) return { processed: 0, sent: 0, failed: 0 };
@@ -14,14 +18,12 @@ class DisruptionNotificationWorker {
 
       for (const item of pendingItems) {
         try {
-          // Simulate email/SMS notification dispatch
-          const mockSuccess = true; // Simulating email dispatch success
-          if (mockSuccess) {
-            await disruptionRepository.updateNotificationStatus(null, item.affected_id, 'SENT');
-            sentCount++;
-          } else {
-            throw new Error('Notification gateway unreachable');
-          }
+          await require('../services/emailWebhookService').postJson(webhook, {
+            notification_id: item.affected_id, email: item.user_email, first_name: item.first_name,
+            flight_number: item.flight_number, disruption_type: item.disruption_type, reason: item.reason
+          });
+          await disruptionRepository.updateNotificationStatus(null, item.affected_id, 'SENT');
+          sentCount++;
         } catch (err) {
           await disruptionRepository.updateNotificationStatus(null, item.affected_id, 'FAILED', err.message);
           failedCount++;

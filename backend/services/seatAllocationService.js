@@ -35,8 +35,11 @@ class SeatAllocationService {
 
     // 3. Process temporary holds
     const heldSeats = [];
-    for (const seatNumber of cleanedSeats) {
-      await seatRepository.holdSeat(connection, flightId, seatNumber, userId, durationMinutes);
+    const sessionId = `legacy:${userId}:${flightId}`;
+    const holdRepository = require('../repositories/seatHoldRepository');
+    const holdMinutes = Math.min(10, Math.max(1, Number(durationMinutes) || 10));
+    for (const [passengerIndex, seatNumber] of cleanedSeats.entries()) {
+      await holdRepository.createOrUpdateHold(connection, { flightId, seatNumber, userId, sessionId, passengerIndex, durationMinutes: holdMinutes });
       heldSeats.push(seatNumber);
     }
 
@@ -44,14 +47,15 @@ class SeatAllocationService {
       flightId,
       userId,
       heldSeats,
-      expiresInMinutes: durationMinutes
+      expiresInMinutes: holdMinutes,
+      session_id: sessionId
     };
   }
 
   /**
    * Validate and allocate confirmed seats for a booking inside transaction
    */
-  async processSeatAllocations(connection, flightId, aircraftId, bookingId, userId, passengers) {
+  async processSeatAllocations(connection, flightId, aircraftId, bookingId, userId, passengers, cabinClass = null) {
     const seatNumbers = passengers
       .map(p => p.seat_number)
       .filter(s => typeof s === 'string' && s.trim().length > 0)
@@ -71,7 +75,7 @@ class SeatAllocationService {
     }
 
     // 2. Prevent booking seat from another aircraft
-    const invalidSeats = await seatRepository.verifySeatsBelongToAircraft(connection, aircraftId, seatNumbers);
+    const invalidSeats = await seatRepository.verifySeatsBelongToAircraft(connection, aircraftId, seatNumbers, cabinClass);
     if (invalidSeats.length > 0) {
       const error = new Error(`Seat(s) ${invalidSeats.join(', ')} do not exist on the aircraft assigned to this flight.`);
       error.code = 'INVALID_SEAT';
@@ -82,6 +86,9 @@ class SeatAllocationService {
     // 3. Confirm seat allocations (HELD -> CONFIRMED or AVAILABLE -> CONFIRMED)
     for (const seatNumber of seatNumbers) {
       await seatRepository.allocateSeat(connection, flightId, seatNumber, bookingId, userId);
+    }
+    for (const passenger of passengers) {
+      if (typeof passenger.seat_number === 'string') passenger.seat_number = passenger.seat_number.trim().toUpperCase();
     }
   }
 

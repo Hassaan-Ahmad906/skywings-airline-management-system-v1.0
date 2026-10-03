@@ -4,7 +4,7 @@ const { query, queryOne, pool } = db;
 const { authenticate } = require('../middleware/auth');
 const bookingController = require('../controllers/bookingController');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // All booking routes require authentication
 router.use(authenticate);
@@ -28,6 +28,8 @@ router.get('/list', async (req, res) => {
       SELECT 
         b.booking_id,
         b.booking_reference,
+        b.itinerary_id,
+        b.segment_index,
         b.user_id,
         b.flight_id,
         b.booking_date,
@@ -37,6 +39,8 @@ router.get('/list', async (req, res) => {
         b.status,
         b.payment_status,
         b.payment_method,
+        b.refund_status,
+        b.reservation_expires_at,
         b.created_at,
         b.updated_at,
         f.flight_number,
@@ -126,6 +130,10 @@ router.get('/list', async (req, res) => {
   }
 });
 
+router.get('/payment-options', (req, res) => {
+  res.json({ success: true, data: { demo_enabled: require('../services/paymentService').demoEnabled() } });
+});
+
 // ========== GET SINGLE BOOKING ==========
 router.get('/:id', async (req, res) => {
   try {
@@ -200,137 +208,23 @@ router.get('/:id', async (req, res) => {
 // ========== CANCEL BOOKING ==========
 router.post('/:id/cancel', (req, res) => bookingController.cancelBooking(req, res));
 
-// ========== UPDATE BOOKING STATUS ==========
-router.post('/:id/update-status', async (req, res) => {
-  try {
-    const bookingId = parseInt(req.params.id);
-    const { status } = req.body;
-
-    if (isNaN(bookingId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid booking ID'
-      });
-    }
-
-    const statusLower = (status || '').toLowerCase();
-    const validStatuses = ['pending', 'confirmed', 'checked_in', 'boarded', 'completed', 'cancelled', 'expired', 'missed'];
-
-    if (!status || !validStatuses.includes(statusLower)) {
-      return res.status(400).json({
-        success: false,
-        message: `Valid status is required (${validStatuses.join(', ')})`
-      });
-    }
-
-    // Verify booking belongs to user
-    const booking = await queryOne(
-      'SELECT * FROM bookings WHERE booking_id = ? AND user_id = ?',
-      [bookingId, req.user.userId]
-    );
-
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
-    }
-
-    // Update booking status
-    await query(
-      'UPDATE bookings SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE booking_id = ?',
-      [status, bookingId]
-    );
-
-    res.json({
-      success: true,
-      message: 'Booking status updated successfully'
-    });
-  } catch (error) {
-    console.error('Update booking status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update booking status: ' + error.message
-    });
-  }
+// Legacy clients must use the dedicated payment, cancellation, check-in, and
+// authorized operational actions. Never accept arbitrary customer state writes.
+router.post('/:id/update-status', (req, res) => {
+  res.status(403).json({
+    success: false,
+    message: 'Booking status changes require a dedicated booking action.',
+    error: { code: 'BOOKING_STATUS_UPDATE_FORBIDDEN' }
+  });
 });
 
-// ========== PAY FOR PENDING BOOKING ==========
+// Explicit development-only demo confirmation. Real payments require a provider integration.
 router.post('/:id/pay', async (req, res) => {
   try {
-    const bookingId = parseInt(req.params.id);
-    const userId = req.user.userId;
-    const paymentMethod = req.body.payment_method || 'Credit Card';
-
-    const booking = await queryOne(
-      'SELECT * FROM bookings WHERE booking_id = ? AND user_id = ?',
-      [bookingId, userId]
-    );
-
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-
-    if (booking.status.toUpperCase() !== 'PENDING') {
-      return res.status(400).json({ success: false, message: `Booking is in ${booking.status} status and cannot be paid.` });
-    }
-
-    const bookingStateMachine = require('../services/bookingStateMachine');
-    const ticketService = require('../services/ticketService');
-    const db = require('../config/database');
-    const connection = await db.pool.getConnection();
-
-    try {
-      await connection.beginTransaction();
-
-      await bookingStateMachine.transitionBookingState(
-        connection,
-        bookingId,
-        'CONFIRMED',
-        { userId, role: 'user', type: 'BOOKING_SERVICE' },
-        `Customer completed payment via ${paymentMethod}`
-      );
-
-      await connection.execute(
-        `UPDATE bookings SET payment_status = 'paid', payment_method = ? WHERE booking_id = ?`,
-        [paymentMethod, bookingId]
-      );
-
-      const [passengers] = await connection.execute(
-        `SELECT bp.passenger_id, bp.seat_number FROM booking_passengers bp WHERE bp.booking_id = ?`,
-        [bookingId]
-      );
-
-      await ticketService.issueTicketsForBooking(
-        connection,
-        bookingId,
-        booking.flight_id,
-        booking.class,
-        passengers,
-        userId
-      );
-
-      await connection.commit();
-
-      // Dispatch payment confirmation email webhook to n8n
-      const emailWebhookService = require('../services/emailWebhookService');
-      emailWebhookService.triggerPaymentConfirmationWebhook(bookingId).catch(err => {
-        console.error('[BookingsRoute] Pay pending webhook trigger error:', err.message);
-      });
-
-      res.json({
-        success: true,
-        message: 'Payment completed successfully! Booking is now CONFIRMED.'
-      });
-    } catch (err) {
-      await connection.rollback();
-      throw err;
-    } finally {
-      connection.release();
-    }
+    const data = await require('../services/paymentService').confirmDemoPayment(req.user.userId, Number(req.params.id));
+    res.json({ success: true, message: 'Demo booking confirmed; no money collected.', data });
   } catch (error) {
-    console.error('Pay pending booking error:', error);
-    res.status(500).json({ success: false, message: 'Payment failed: ' + error.message });
+    res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Payment confirmation failed', error: { code: error.code || 'PAYMENT_FAILED' } });
   }
 });
 
@@ -444,7 +338,19 @@ router.post('/:id/rebook', async (req, res) => {
 // 4. Rebooking History
 router.get('/:id/rebook/history', async (req, res) => {
   try {
-    const bookingId = parseInt(req.params.id, 10);
+    const bookingId = Number(req.params.id);
+    if (!Number.isSafeInteger(bookingId) || bookingId < 1) {
+      return res.status(400).json({ success: false, message: 'Invalid booking ID' });
+    }
+    const booking = await queryOne(
+      req.user.role === 'admin'
+        ? 'SELECT booking_id FROM bookings WHERE booking_id = ?'
+        : 'SELECT booking_id FROM bookings WHERE booking_id = ? AND user_id = ?',
+      req.user.role === 'admin' ? [bookingId] : [bookingId, req.user.userId]
+    );
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
     const history = await rebookingRepository.getHistoryByBooking(null, bookingId);
     res.json({
       success: true,

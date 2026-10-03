@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const ticketController = require('../controllers/ticketController');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // Require JWT authentication for all ticket routes
 router.use(authenticate);

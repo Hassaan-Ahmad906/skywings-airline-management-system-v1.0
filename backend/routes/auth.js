@@ -4,7 +4,7 @@ const { body, validationResult } = require('express-validator');
 const { query, queryOne } = require('../config/database');
 const { generateToken } = require('../middleware/auth');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // ========== REGISTER ==========
 router.post('/register', [
@@ -145,7 +145,7 @@ router.post('/login', [
 
     // Get user from database
     const user = await queryOne(
-      `SELECT user_id, first_name, last_name, email, password, role, status, phone, date_of_birth, address
+      `SELECT user_id, first_name, last_name, email, password, role, status, phone, date_of_birth, address, token_version
        FROM users WHERE email = ?`,
       [email]
     );
@@ -205,7 +205,7 @@ router.post('/login', [
     }
 
     // Generate token
-    const token = generateToken(user.user_id, user.email, user.role);
+    const token = generateToken(user.user_id, user.email, user.role, user.token_version);
 
     // Audit log successful login
     await auditService.logEvent({
@@ -293,7 +293,8 @@ router.get('/check', authenticate, async (req, res) => {
 });
 
 // ========== LOGOUT ==========
-router.post('/logout', (req, res) => {
+router.post('/logout', authenticate, async (req, res) => {
+  await query('UPDATE users SET token_version = token_version + 1 WHERE user_id = ?', [req.user.userId]);
   // Clear server cookie with the same path as it was set on
   res.clearCookie('authToken', { path: '/' });
   res.json({

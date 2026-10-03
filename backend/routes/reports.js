@@ -2,96 +2,15 @@ const express = require('express');
 const { query, queryOne } = require('../config/database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // All report routes require authentication and admin role
 router.use(authenticate);
 router.use(requireAdmin);
 
-async function syncFlightAndBookingStatuses() {
-  try {
-    // 1. Auto-complete flights that arrived cleanly before now
-    await query(`
-      UPDATE flights SET status = 'completed' 
-      WHERE LOWER(status) IN ('scheduled', 'in_air', 'boarding') AND arrival_datetime <= CURRENT_TIMESTAMP
-    `);
-
-    // 2. Auto-cancel flights that are > 24 hours past departure datetime and still not completed
-    await query(`
-      UPDATE flights SET status = 'cancelled' 
-      WHERE LOWER(status) IN ('scheduled', 'delayed', 'in_air') 
-        AND departure_datetime < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 24 HOUR)
-    `);
-
-    // 3. Cascade flight cancellation to linked active bookings and refund passenger amounts
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'CANCELLED',
-          b.payment_status = 'refunded',
-          b.state_change_reason = 'Flight Auto-Cancelled (Unfulfilled >24h Past Departure)',
-          b.cancelled_at = CURRENT_TIMESTAMP
-      WHERE LOWER(f.status) = 'cancelled' AND LOWER(b.status) IN ('confirmed', 'pending', 'checked_in')
-    `);
-
-    // 4. Update linked ticket statuses
-    await query(`
-      UPDATE tickets t
-      JOIN bookings b ON t.booking_id = b.booking_id
-      SET t.status = 'CANCELLED'
-      WHERE LOWER(b.status) = 'cancelled' AND LOWER(t.status) != 'cancelled'
-    `);
-
-    // 5. Release seat allocations for auto-cancelled bookings
-    await query(`
-      DELETE fsa FROM flight_seat_allocations fsa
-      JOIN bookings b ON fsa.booking_id = b.booking_id
-      WHERE LOWER(b.status) = 'cancelled'
-    `);
-
-    // 6. Synchronize past flight booking statuses (BOARDED vs MISSED)
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'BOARDED'
-      WHERE f.departure_datetime <= CURRENT_TIMESTAMP
-        AND LOWER(b.status) IN ('confirmed', 'completed', 'checked_in')
-        AND EXISTS (
-          SELECT 1 FROM booking_passengers bp 
-          WHERE bp.booking_id = b.booking_id AND bp.seat_number IS NOT NULL AND bp.seat_number != ''
-        )
-    `);
-
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'MISSED',
-          b.state_change_reason = 'Passenger Missed Flight (No Check-in / No Show)'
-      WHERE f.departure_datetime <= CURRENT_TIMESTAMP
-        AND LOWER(b.status) IN ('confirmed', 'completed')
-        AND NOT EXISTS (
-          SELECT 1 FROM booking_passengers bp 
-          WHERE bp.booking_id = b.booking_id AND bp.seat_number IS NOT NULL AND bp.seat_number != ''
-        )
-    `);
-
-    // 7. Expire unpaid pending bookings whose flight departure datetime has passed
-    await query(`
-      UPDATE bookings b
-      JOIN flights f ON b.flight_id = f.flight_id
-      SET b.status = 'EXPIRED',
-          b.state_change_reason = 'Payment Window Expired Prior to Departure'
-      WHERE LOWER(b.status) = 'pending' AND f.departure_datetime <= CURRENT_TIMESTAMP
-    `);
-  } catch (err) {
-    console.error('Error during auto flight/booking sync in reports:', err.message);
-  }
-}
-
 // ========== OVERVIEW STATISTICS ==========
 router.get('/overview', async (req, res) => {
   try {
-    await syncFlightAndBookingStatuses();
 
     // Total revenue (exact match with admin stats)
     const totalRevenue = await queryOne(
@@ -153,27 +72,26 @@ router.get('/overview', async (req, res) => {
     );
 
     const totalFlights = (onTimeFlights?.total || 0) + (delayedFlights?.total || 0);
-    const onTimeRate = totalFlights > 0 
-      ? Math.round(((onTimeFlights?.total || 0) / totalFlights) * 100) 
-      : 95;
+    const onTimeRate = null; // Actual departure timestamps are not recorded.
 
     // Occupancy rate
     const totalSeats = await queryOne(
       `SELECT COALESCE(SUM(a.capacity), 0) as total 
        FROM flights f
-       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id`
+       INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id WHERE f.status <> 'cancelled'`
     );
 
     const bookedSeats = await queryOne(
       `SELECT COUNT(*) as total 
        FROM booking_passengers bp
        INNER JOIN bookings b ON bp.booking_id = b.booking_id
-       WHERE LOWER(b.status) NOT IN ('cancelled', 'expired')`
+       INNER JOIN flights f ON f.flight_id = b.flight_id
+       WHERE f.status <> 'cancelled' AND b.status IN ('CONFIRMED','CHECKED_IN','BOARDED','COMPLETED')`
     );
 
     const occupancyRate = (totalSeats?.total || 0) > 0
       ? Math.min(100, Math.round(((bookedSeats?.total || 0) / (totalSeats?.total || 0)) * 100))
-      : 78;
+      : 0;
 
     res.json({
       success: true,
@@ -190,7 +108,7 @@ router.get('/overview', async (req, res) => {
         performance: {
           onTimeRate,
           occupancyRate,
-          customerSatisfaction: 4.8
+          customerSatisfaction: null
         }
       }
     });
@@ -206,7 +124,6 @@ router.get('/overview', async (req, res) => {
 // ========== REVENUE REPORTS ==========
 router.get('/revenue', async (req, res) => {
   try {
-    await syncFlightAndBookingStatuses();
 
     // Total revenue (exact match with admin stats and overview)
     const totalRevenue = await queryOne(
@@ -265,7 +182,7 @@ router.get('/revenue', async (req, res) => {
     const lastMonth = parseFloat(lastMonthRevenue?.total || 0);
     const growth = lastMonth > 0 
       ? (((currentMonthRevenue - lastMonth) / lastMonth) * 100).toFixed(1)
-      : '12.5';
+      : null;
 
     res.json({
       success: true,
@@ -274,7 +191,7 @@ router.get('/revenue', async (req, res) => {
         monthlyRevenue: currentMonthRevenue,
         revenueByRoute: revenueByRoute || [],
         revenueTrend: revenueTrend || [],
-        growth: parseFloat(growth)
+        growth: growth === null ? null : parseFloat(growth)
       }
     });
   } catch (error) {
@@ -476,16 +393,14 @@ router.get('/performance', async (req, res) => {
     );
 
     const totalFlights = (onTimeFlights?.total || 0) + (delayedFlights?.total || 0) + (cancelledFlights?.total || 0);
-    const onTimeRate = totalFlights > 0 
-      ? Math.round(((onTimeFlights?.total || 0) / totalFlights) * 100) 
-      : 95;
+    const onTimeRate = null; // Actual departure timestamps are not recorded.
 
     // Occupancy rate
     const totalSeats = await queryOne(
       `SELECT COALESCE(SUM(a.capacity), 0) as total 
        FROM flights f
        INNER JOIN aircraft a ON f.aircraft_id = a.aircraft_id
-       WHERE LOWER(f.status) IN ('scheduled', 'boarding', 'completed')`
+       WHERE f.status <> 'cancelled'`
     );
 
     const bookedSeats = await queryOne(
@@ -527,17 +442,17 @@ router.get('/performance', async (req, res) => {
           total: totalSeats?.total || 0
         },
         customerSatisfaction: {
-          average: 4.5, // Placeholder
+          average: null, available: false,
           breakdown: {
-            fiveStars: 856,
-            fourStars: 312,
-            threeStars: 66
+            fiveStars: 0,
+            fourStars: 0,
+            threeStars: 0
           }
         },
         efficiency: {
           avgFlightTime: `${hours}h ${minutes}m`,
-          fuelEfficiency: 92, // Placeholder
-          maintenanceScore: 98 // Placeholder
+          fuelEfficiency: null,
+          maintenanceScore: null
         }
       }
     });

@@ -4,7 +4,7 @@ const { query, queryOne } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const seatAllocationService = require('../services/seatAllocationService');
 
-const router = express.Router();
+const router = require('../middleware/asyncRouter')();
 
 // All check-in routes require authentication
 router.use(authenticate);
@@ -153,7 +153,7 @@ router.post('/search', [
        FROM booking_passengers bp
        INNER JOIN passengers p ON bp.passenger_id = p.passenger_id
        WHERE bp.booking_id = ?
-       ORDER BY p.last_name, p.first_name`,
+       ORDER BY bp.booking_passenger_id`,
       [booking.booking_id]
     );
 
@@ -213,6 +213,14 @@ router.post('/confirm', [
     const { booking_id, seat_numbers, gate_number } = req.body;
     const bookingId = parseInt(booking_id);
 
+    const [metadata] = await connection.execute('SELECT flight_id FROM bookings WHERE booking_id = ? AND user_id = ?', [bookingId, req.user.userId]);
+    if (!metadata.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+    // Use the same flight-before-booking lock order as holds and disruptions.
+    const [flightRows] = await connection.execute('SELECT departure_datetime, aircraft_id, status FROM flights WHERE flight_id = ? FOR UPDATE', [metadata[0].flight_id]);
+
     // Verify booking exists and belongs to user
     const [bookingRows] = await connection.execute(
       'SELECT * FROM bookings WHERE booking_id = ? AND user_id = ? AND (LOWER(status) = "confirmed") FOR UPDATE',
@@ -228,6 +236,10 @@ router.post('/confirm', [
     }
 
     const bookingData = bookingRows[0];
+    if (bookingData.flight_id !== metadata[0].flight_id) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'This booking changed. Refresh before checking in.' });
+    }
 
     // Check if already checked in
     const [existingCheckInRows] = await connection.execute(
@@ -244,19 +256,17 @@ router.post('/confirm', [
     }
 
     // Verify check-in window
-    const [flightRows] = await connection.execute(
-      `SELECT f.departure_datetime, f.aircraft_id
-       FROM flights f
-       WHERE f.flight_id = ? FOR UPDATE`,
-      [bookingData.flight_id]
-    );
-
     if (!flightRows || flightRows.length === 0) {
       await connection.rollback();
       return res.status(404).json({
         success: false,
         message: 'Flight not found'
       });
+    }
+
+    if (['cancelled', 'completed', 'in_air'].includes(flightRows[0].status) || bookingData.payment_status !== 'paid') {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'This booking is unavailable for check-in' });
     }
 
     const departureTime = new Date(flightRows[0].departure_datetime);
@@ -284,7 +294,7 @@ router.post('/confirm', [
 
     // Get passengers for this booking
     const [passengerRows] = await connection.execute(
-      'SELECT booking_passenger_id FROM booking_passengers WHERE booking_id = ? ORDER BY booking_passenger_id',
+      'SELECT booking_passenger_id, passenger_id FROM booking_passengers WHERE booking_id = ? ORDER BY booking_passenger_id',
       [bookingId]
     );
 
@@ -305,8 +315,13 @@ router.post('/confirm', [
       flightRows[0].aircraft_id,
       bookingId,
       req.user.userId,
-      normalizedSeatNumbers.map(seat_number => ({ seat_number }))
+      normalizedSeatNumbers.map(seat_number => ({ seat_number })),
+      bookingData.class
     );
+
+    const placeholders = normalizedSeatNumbers.map(() => '?').join(',');
+    await connection.execute(`DELETE FROM flight_seat_allocations WHERE booking_id = ? AND seat_number NOT IN (${placeholders})`, [bookingId, ...normalizedSeatNumbers]);
+    await connection.execute(`UPDATE seat_holds SET status = 'CONSUMED' WHERE flight_id = ? AND user_id = ? AND status = 'HELD' AND seat_number IN (${placeholders})`, [bookingData.flight_id, req.user.userId, ...normalizedSeatNumbers]);
 
     // Create check-in record
     await connection.execute(
@@ -318,28 +333,13 @@ router.post('/confirm', [
     // Update seat numbers for passengers
     for (let i = 0; i < passengerRows.length && i < seat_numbers.length; i++) {
       await connection.execute(
-        'UPDATE booking_passengers SET seat_number = ? WHERE booking_passenger_id = ?',
-        [normalizedSeatNumbers[i], passengerRows[i].booking_passenger_id]
+        'UPDATE booking_passengers SET seat_number = ?, boarding_token = ?, boarded_at = NULL WHERE booking_passenger_id = ?',
+        [normalizedSeatNumbers[i], require('crypto').randomBytes(32).toString('hex'), passengerRows[i].booking_passenger_id]
       );
     }
 
-    // Transition associated tickets from ISSUED -> USED via check-in flow
-    const ticketRepository = require('../repositories/ticketRepository');
-    const ticketService = require('../services/ticketService');
-    const bookingTickets = await ticketRepository.findByBookingId(connection, bookingId);
-
-    for (const t of bookingTickets) {
-      if (t.status === 'ISSUED') {
-        await ticketService.updateTicketStatus(
-          connection,
-          t.ticket_id,
-          t.status,
-          'USED',
-          null,
-          'Check-in completed and boarding pass issued',
-          { isCheckInFlow: true }
-        );
-      }
+    for (let i = 0; i < passengerRows.length; i++) {
+      await connection.execute('UPDATE tickets SET seat_number = ? WHERE booking_id = ? AND passenger_id = ? AND status = ?', [normalizedSeatNumbers[i], bookingId, passengerRows[i].passenger_id, 'ISSUED']);
     }
 
     // Transition booking state to CHECKED_IN via Booking State Machine
@@ -404,8 +404,8 @@ router.get('/boarding-pass/:bookingId', async (req, res) => {
        INNER JOIN flights f ON b.flight_id = f.flight_id
        INNER JOIN airports dep ON f.from_airport_code = dep.airport_code
        INNER JOIN airports arr ON f.to_airport_code = arr.airport_code
-       LEFT JOIN check_ins ci ON b.booking_id = ci.booking_id
-       WHERE b.booking_id = ? AND b.user_id = ?`,
+       INNER JOIN check_ins ci ON b.booking_id = ci.booking_id AND ci.status = 'completed'
+       WHERE b.booking_id = ? AND b.user_id = ? AND b.status IN ('CHECKED_IN','BOARDED','COMPLETED')`,
       [bookingId, req.user.userId]
     );
 
@@ -414,7 +414,7 @@ router.get('/boarding-pass/:bookingId', async (req, res) => {
     }
 
     const passengers = await query(
-      `SELECT p.first_name, p.last_name, bp.seat_number
+      `SELECT p.passenger_id, p.first_name, p.last_name, bp.seat_number, bp.boarding_token
        FROM booking_passengers bp
        INNER JOIN passengers p ON bp.passenger_id = p.passenger_id
        WHERE bp.booking_id = ?`,
@@ -431,6 +431,18 @@ router.get('/boarding-pass/:bookingId', async (req, res) => {
     console.error('Boarding pass fetch error:', error);
     res.status(500).json({ success: false, message: 'Failed to retrieve boarding pass: ' + error.message });
   }
+});
+
+router.get('/boarding-code/:bookingId/:passengerId', async (req, res) => {
+  try {
+    const pass = await queryOne(`SELECT bp.boarding_token FROM booking_passengers bp
+      JOIN bookings b ON b.booking_id = bp.booking_id JOIN check_ins ci ON ci.booking_id = b.booking_id
+      WHERE b.booking_id = ? AND bp.passenger_id = ? AND b.user_id = ? AND ci.status = 'completed'
+        AND b.status IN ('CHECKED_IN','BOARDED','COMPLETED')`, [Number(req.params.bookingId), Number(req.params.passengerId), req.user.userId]);
+    if (!pass?.boarding_token) return res.status(404).json({ success: false, message: 'Boarding code unavailable' });
+    const svg = await require('qrcode').toString(pass.boarding_token, { type: 'svg', errorCorrectionLevel: 'M', margin: 4 });
+    res.set('Cache-Control', 'private, no-store').type('image/svg+xml').send(svg);
+  } catch { res.status(500).json({ success: false, message: 'Boarding code could not be generated' }); }
 });
 
 module.exports = router;

@@ -1,221 +1,114 @@
-/**
- * SkyWings Airlines - Master Database Seeder
- * Seeds Admin credentials, 20 Active Customer Users, Airports, Fleet, Seats, and Flights.
- */
-const bcrypt = require('bcryptjs');
-const { pool } = require('../backend/config/database');
-
-async function seedDatabase() {
-  const connection = await pool.getConnection();
+﻿const bcrypt = require('bcryptjs');
+const crypto = require('node:crypto');
+const db = require('../backend/config/database');
+const bookingService = require('../backend/services/bookingService');
+const paymentService = require('../backend/services/paymentService');
+const stateMachine = require('../backend/services/bookingStateMachine');
+const seatAllocation = require('../backend/services/seatAllocationService');
+const names = [
+  ['Ali','Raza','Karachi'], ['Ayesha','Khan','Lahore'], ['Hassan','Ahmed','Islamabad'],
+  ['Fatima','Malik','Rawalpindi'], ['Usman','Iqbal','Peshawar'], ['Sana','Ahmed','Multan'],
+  ['Bilal','Hussain','Faisalabad'], ['Zainab','Sheikh','Sialkot'], ['Hamza','Ali','Quetta'],
+  ['Mariam','Farooq','Karachi'], ['Zoya','Siddiqui','Lahore'], ['Danish','Abbasi','Islamabad']
+];
+const airports = [
+  ['KHI','Jinnah International Airport','Karachi','Pakistan'], ['LHE','Allama Iqbal International Airport','Lahore','Pakistan'],
+  ['ISB','Islamabad International Airport','Islamabad','Pakistan'], ['PEW','Bacha Khan International Airport','Peshawar','Pakistan'],
+  ['UET','Quetta International Airport','Quetta','Pakistan'], ['MUX','Multan International Airport','Multan','Pakistan'],
+  ['SKT','Sialkot International Airport','Sialkot','Pakistan'], ['LYP','Faisalabad International Airport','Faisalabad','Pakistan'],
+  ['DXB','Dubai International Airport','Dubai','United Arab Emirates'], ['DOH','Hamad International Airport','Doha','Qatar'],
+  ['JED','King Abdulaziz International Airport','Jeddah','Saudi Arabia'], ['RUH','King Khalid International Airport','Riyadh','Saudi Arabia']
+];
+async function checkInSeed(bookingId, userId, seats) {
+  const connection = await db.pool.getConnection();
   try {
-    console.log('🌱 Starting SkyWings Airlines Database Seeding...');
     await connection.beginTransaction();
-
-    // 1. Hash Passwords
-    const adminHash = await bcrypt.hash('admin123', 10);
-    const userHash = await bcrypt.hash('user123', 10);
-
-    // 2. Seed Admin & Primary User
-    console.log('👤 Seeding System Administrator and Primary User...');
-    await connection.execute(
-      `INSERT INTO users (first_name, last_name, email, password, phone, date_of_birth, address, role, status)
-       VALUES 
-       ('System', 'Admin', 'admin@skywings.com', ?, '+1-555-0100', '1985-05-15', 'SkyWings HQ, New York, USA', 'admin', 'active'),
-       ('John', 'Doe', 'user@skywings.com', ?, '+1-555-0101', '1992-08-20', '123 Main St, New York, USA', 'user', 'active')
-       ON DUPLICATE KEY UPDATE 
-         first_name = VALUES(first_name),
-         last_name = VALUES(last_name),
-         password = VALUES(password),
-         role = VALUES(role),
-         status = VALUES(status)`,
-      [adminHash, userHash]
-    );
-
-    // 3. Seed 20 Realistic Enterprise Customer Users
-    console.log('👥 Seeding 20 Active Customer Accounts...');
-    const customerUsers = [
-      { first: 'Emily', last: 'Clark', email: 'emily.clark@skywings.com', phone: '+1-555-0201', dob: '1990-03-12', address: '456 Oak Ave, Los Angeles, USA', passport: 'US89214710', nationality: 'American' },
-      { first: 'David', last: 'Miller', email: 'david.miller@skywings.com', phone: '+1-555-0202', dob: '1988-11-25', address: '789 Pine Rd, Chicago, USA', passport: 'US89214711', nationality: 'American' },
-      { first: 'Sarah', last: 'Jenkins', email: 'sarah.jenkins@skywings.com', phone: '+44-20-7946-0101', dob: '1995-07-04', address: '12 Oxford St, London, UK', passport: 'GB78419201', nationality: 'British' },
-      { first: 'Michael', last: 'Brown', email: 'michael.brown@skywings.com', phone: '+1-555-0204', dob: '1982-01-18', address: '321 Elm St, Miami, USA', passport: 'US89214713', nationality: 'American' },
-      { first: 'Jessica', last: 'Taylor', email: 'jessica.taylor@skywings.com', phone: '+1-555-0205', dob: '1993-09-30', address: '654 Maple Dr, Seattle, USA', passport: 'US89214714', nationality: 'American' },
-      { first: 'James', last: 'Anderson', email: 'james.anderson@skywings.com', phone: '+61-2-9374-4001', dob: '1987-04-14', address: '88 George St, Sydney, Australia', passport: 'AU90381241', nationality: 'Australian' },
-      { first: 'Olivia', last: 'Martinez', email: 'olivia.martinez@skywings.com', phone: '+34-91-123-4567', dob: '1996-12-08', address: '24 Gran Via, Madrid, Spain', passport: 'ES67129034', nationality: 'Spanish' },
-      { first: 'Daniel', last: 'Thomas', email: 'daniel.thomas@skywings.com', phone: '+1-555-0208', dob: '1991-06-22', address: '159 Cedar Ln, Boston, USA', passport: 'US89214717', nationality: 'American' },
-      { first: 'Sophia', last: 'Jackson', email: 'sophia.jackson@skywings.com', phone: '+33-1-4268-5500', dob: '1994-02-17', address: '10 Champs-Elysees, Paris, France', passport: 'FR45129834', nationality: 'French' },
-      { first: 'William', last: 'White', email: 'william.white@skywings.com', phone: '+1-555-0210', dob: '1980-10-05', address: '753 Birch St, Denver, USA', passport: 'US89214719', nationality: 'American' },
-      { first: 'Ava', last: 'Harris', email: 'ava.harris@skywings.com', phone: '+1-555-0211', dob: '1997-08-19', address: '951 Walnut St, Austin, USA', passport: 'US89214720', nationality: 'American' },
-      { first: 'Alexander', last: 'Martin', email: 'alexander.martin@skywings.com', phone: '+49-30-2312-500', dob: '1989-05-29', address: '15 Friedrichstrasse, Berlin, Germany', passport: 'DE89234109', nationality: 'German' },
-      { first: 'Mia', last: 'Thompson', email: 'mia.thompson@skywings.com', phone: '+1-555-0213', dob: '1998-03-03', address: '357 Spruce Ct, San Francisco, USA', passport: 'US89214722', nationality: 'American' },
-      { first: 'Ethan', last: 'Garcia', email: 'ethan.garcia@skywings.com', phone: '+971-4-362-7000', dob: '1986-12-12', address: 'Sheikh Zayed Rd, Dubai, UAE', passport: 'AE56129845', nationality: 'Emirati' },
-      { first: 'Charlotte', last: 'Robinson', email: 'charlotte.robinson@skywings.com', phone: '+1-555-0215', dob: '1992-07-27', address: '246 Ash Blvd, Atlanta, USA', passport: 'US89214724', nationality: 'American' },
-      { first: 'Lucas', last: 'Clark', email: 'lucas.clark@skywings.com', phone: '+81-3-5555-0143', dob: '1990-09-15', address: 'Minato-ku, Tokyo, Japan', passport: 'JP90412890', nationality: 'Japanese' },
-      { first: 'Amelia', last: 'Rodriguez', email: 'amelia.rodriguez@skywings.com', phone: '+1-555-0217', dob: '1995-11-11', address: '135 Willow Way, Phoenix, USA', passport: 'US89214726', nationality: 'American' },
-      { first: 'Benjamin', last: 'Lewis', email: 'benjamin.lewis@skywings.com', phone: '+65-6789-0123', dob: '1984-04-02', address: 'Marina Bay Sands, Singapore', passport: 'SG78129045', nationality: 'Singaporean' },
-      { first: 'Harper', last: 'Lee', email: 'harper.lee@skywings.com', phone: '+1-555-0219', dob: '1999-01-23', address: '468 Magnolia St, Dallas, USA', passport: 'US89214728', nationality: 'American' },
-      { first: 'Henry', last: 'Walker', email: 'henry.walker@skywings.com', phone: '+1-555-0220', dob: '1983-08-08', address: '579 Hickory Rd, Portland, USA', passport: 'US89214729', nationality: 'American' }
-    ];
-
-    for (const u of customerUsers) {
-      await connection.execute(
-        `INSERT INTO users (first_name, last_name, email, password, phone, date_of_birth, address, role, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active')
-         ON DUPLICATE KEY UPDATE 
-           first_name = VALUES(first_name),
-           last_name = VALUES(last_name),
-           password = VALUES(password),
-           phone = VALUES(phone),
-           address = VALUES(address)`,
-        [u.first, u.last, u.email, userHash, u.phone, u.dob, u.address]
-      );
-
-      const [userRows] = await connection.execute('SELECT user_id FROM users WHERE email = ?', [u.email]);
-      if (userRows.length > 0) {
-        const userId = userRows[0].user_id;
-        // User Preferences
-        await connection.execute(
-          `INSERT INTO user_preferences (user_id, preferred_seat, meal_preference, newsletter_subscription)
-           VALUES (?, 'window', 'non-vegetarian', TRUE)
-           ON DUPLICATE KEY UPDATE preferred_seat = VALUES(preferred_seat)`,
-          [userId]
-        );
-        // Saved Passenger Profile
-        await connection.execute(
-          `INSERT INTO passengers (user_id, first_name, last_name, date_of_birth, passport_number, nationality, is_saved)
-           VALUES (?, ?, ?, ?, ?, ?, TRUE)
-           ON DUPLICATE KEY UPDATE passport_number = VALUES(passport_number)`,
-          [userId, u.first, u.last, u.dob, u.passport, u.nationality]
-        );
-      }
+    const [rows] = await connection.execute('SELECT b.*, f.aircraft_id, f.departure_datetime FROM bookings b JOIN flights f ON f.flight_id = b.flight_id WHERE b.booking_id = ? FOR UPDATE', [bookingId]);
+    const booking = rows[0];
+    await seatAllocation.processSeatAllocations(connection, booking.flight_id, booking.aircraft_id, bookingId, userId, seats.map(seat_number => ({ seat_number })), booking.class);
+    const [passengers] = await connection.execute('SELECT * FROM booking_passengers WHERE booking_id = ? ORDER BY booking_passenger_id', [bookingId]);
+    for (let i = 0; i < passengers.length; i++) {
+      await connection.execute('UPDATE booking_passengers SET seat_number = ?, boarding_token = ? WHERE booking_passenger_id = ?', [seats[i], crypto.randomBytes(32).toString('hex'), passengers[i].booking_passenger_id]);
+      await connection.execute('UPDATE tickets SET seat_number = ? WHERE booking_id = ? AND passenger_id = ?', [seats[i], bookingId, passengers[i].passenger_id]);
     }
-
-    // 4. Seed Standard International Airports
-    console.log('🛫 Seeding Airports...');
-    const airports = [
-      ['NYC', 'John F. Kennedy International Airport', 'New York', 'USA'],
-      ['LON', 'Heathrow Airport', 'London', 'UK'],
-      ['DXB', 'Dubai International Airport', 'Dubai', 'UAE'],
-      ['PAR', 'Charles de Gaulle Airport', 'Paris', 'France'],
-      ['TOK', 'Haneda Airport', 'Tokyo', 'Japan'],
-      ['LAX', 'Los Angeles International Airport', 'Los Angeles', 'USA'],
-      ['CHI', 'O\'Hare International Airport', 'Chicago', 'USA'],
-      ['MIA', 'Miami International Airport', 'Miami', 'USA'],
-      ['SIN', 'Singapore Changi Airport', 'Singapore', 'Singapore'],
-      ['SYD', 'Sydney Kingsford Smith Airport', 'Sydney', 'Australia'],
-      ['FRA', 'Frankfurt Airport', 'Frankfurt', 'Germany'],
-      ['IST', 'Istanbul Airport', 'Istanbul', 'Turkey']
-    ];
-
-    for (const [code, name, city, country] of airports) {
-      await connection.execute(
-        `INSERT INTO airports (airport_code, airport_name, city, country)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE airport_name = VALUES(airport_name), city = VALUES(city), country = VALUES(country)`,
-        [code, name, city, country]
-      );
-    }
-
-    // 5. Seed Aircraft Fleet
-    console.log('✈️ Seeding Aircraft Fleet...');
-    const fleet = [
-      ['Boeing 737-800', 'SW-001', 180, 'active'],
-      ['Boeing 777-300ER', 'SW-002', 365, 'active'],
-      ['Airbus A320neo', 'SW-003', 180, 'active'],
-      ['Airbus A350-900', 'SW-004', 325, 'active']
-    ];
-
-    for (const [model, reg, capacity, status] of fleet) {
-      await connection.execute(
-        `INSERT INTO aircraft (model, registration, capacity, status)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE model = VALUES(model), capacity = VALUES(capacity), status = VALUES(status)`,
-        [model, reg, capacity, status]
-      );
-    }
-
-    // 6. Generate Aircraft Physical Seat Maps (Bulk Batch Insert)
-    console.log('💺 Generating Aircraft Physical Seat Maps (Fast Batch Insert)...');
-    const [aircraftRows] = await connection.execute('SELECT aircraft_id, model, capacity FROM aircraft');
-    for (const plane of aircraftRows) {
-      const rowsCount = plane.capacity === 365 ? 42 : (plane.capacity === 325 ? 40 : 30);
-      const cols = ['A', 'B', 'C', 'D', 'E', 'F'];
-      const seatValues = [];
-      const seatParams = [];
-
-      for (let r = 1; r <= rowsCount; r++) {
-        for (const col of cols) {
-          const seatNumber = `${r}${col}`;
-          const seatClass = r <= 3 ? 'business' : (r <= 5 && plane.capacity > 300 ? 'first' : 'economy');
-          seatValues.push('(?, ?, ?, ?, ?, TRUE)');
-          seatParams.push(plane.aircraft_id, seatNumber, seatClass, r, col);
-        }
-      }
-
-      if (seatValues.length > 0) {
-        await connection.execute(
-          `INSERT INTO seats (aircraft_id, seat_number, seat_class, \`row_number\`, column_letter, is_available)
-           VALUES ${seatValues.join(', ')}
-           ON DUPLICATE KEY UPDATE seat_class = VALUES(seat_class)`,
-          seatParams
-        );
-      }
-    }
-
-    // 7. Seed Scheduled Flights Spanning Future Schedule
-    console.log('📅 Seeding Scheduled Flights...');
-    const flights = [
-      ['SW101', 1, 'NYC', 'LAX', 2, 6, 299.00, 599.00, 999.00],
-      ['SW102', 1, 'LAX', 'NYC', 3, 6, 299.00, 599.00, 999.00],
-      ['SW201', 2, 'LON', 'NYC', 4, 8, 599.00, 1199.00, 1999.00],
-      ['SW202', 2, 'NYC', 'LON', 5, 8, 599.00, 1199.00, 1999.00],
-      ['SW301', 3, 'CHI', 'MIA', 3, 3, 189.00, 399.00, 699.00],
-      ['SW302', 3, 'MIA', 'CHI', 4, 3, 189.00, 399.00, 699.00],
-      ['SW401', 4, 'PAR', 'DXB', 6, 7, 499.00, 999.00, 1599.00],
-      ['SW402', 4, 'DXB', 'TOK', 7, 9, 699.00, 1399.00, 2299.00],
-      ['SW501', 2, 'SIN', 'SYD', 8, 8, 550.00, 1100.00, 1850.00],
-      ['SW601', 1, 'FRA', 'IST', 5, 4, 250.00, 520.00, 890.00],
-      ['SW701', 4, 'TOK', 'SIN', 9, 7, 480.00, 950.00, 1450.00],
-      ['SW801', 3, 'IST', 'LON', 10, 4, 270.00, 560.00, 920.00]
-    ];
-
-    for (const [fNum, acIdx, fromCode, toCode, daysAhead, durationHrs, baseP, bizP, firstP] of flights) {
-      const plane = aircraftRows[acIdx - 1] || aircraftRows[0];
-      await connection.execute(
-        `INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, status, base_price, business_price, first_class_price)
-         VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL ? DAY), INTERVAL ? HOUR), 'scheduled', ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           departure_datetime = VALUES(departure_datetime),
-           arrival_datetime = VALUES(arrival_datetime),
-           base_price = VALUES(base_price),
-           business_price = VALUES(business_price),
-           first_class_price = VALUES(first_class_price),
-           status = 'scheduled'`,
-        [fNum, plane.aircraft_id, fromCode, toCode, daysAhead, daysAhead, durationHrs, baseP, bizP, firstP]
-      );
-    }
-
+    await connection.execute("INSERT INTO check_ins (booking_id, gate_number, boarding_time, status) VALUES (?, 'A1', ?, 'completed')", [bookingId, new Date(new Date(booking.departure_datetime).getTime() - 1800000)]);
+    await stateMachine.transitionBookingState(connection, bookingId, 'CHECKED_IN', { type: 'CHECKIN_AGENT', userId }, 'Synthetic seed check-in');
     await connection.commit();
-    console.log('✅ SkyWings Airlines Database Seeding Completed Successfully!');
-    console.log('📊 Summary:');
-    console.log('   - 1 Administrator Account (admin@skywings.com / admin123)');
-    console.log('   - 1 Standard Customer Account (user@skywings.com / user123)');
-    console.log('   - 20 Dedicated Active Customer Accounts (user123)');
-    console.log('   - 12 International Airports');
-    console.log('   - 4 Active Fleet Aircraft with Complete Seat Maps');
-    console.log('   - 12 Scheduled Multi-Cabin Flights');
-  } catch (error) {
-    await connection.rollback();
-    console.error('❌ Seeding Error:', error);
-    throw error;
-  } finally {
-    connection.release();
+  } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
+}
+async function seedDatabase() {
+  if (process.env.NODE_ENV === 'production' || !paymentService.demoEnabled()) throw new Error('Sample seeding requires development/test mode and PAYMENT_MODE=demo');
+  const [[existing]] = await db.pool.execute('SELECT COUNT(*) AS count FROM users');
+  if (existing.count) { console.log('Database contains users; seeding skipped. Use db:reset for a fresh demo dataset.'); return { skipped: true }; }
+  const hash = await bcrypt.hash('DemoPass123!', 10);
+  const people = [];
+  const connection = await db.pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute("INSERT INTO users (first_name, last_name, email, password, role, address) VALUES ('Ahmed','Farooq','admin@skywings.com',?,'admin','Demo airline office, Karachi, Pakistan')", [hash]);
+    for (const [index, [first,last,city]] of names.entries()) {
+      const email = index === 0 ? 'user@skywings.com' : `${first}.${last}@example.test`.toLowerCase();
+      const dob = `${1988 + index}-05-15`;
+      const [user] = await connection.execute('INSERT INTO users (first_name, last_name, email, password, date_of_birth, address) VALUES (?, ?, ?, ?, ?, ?)', [first,last,email,hash,dob,`Demo neighbourhood, ${city}, Pakistan`]);
+      const [passenger] = await connection.execute("INSERT INTO passengers (user_id, first_name, last_name, date_of_birth, passport_number, nationality, is_saved) VALUES (?, ?, ?, ?, ?, 'Pakistani', 1)", [user.insertId,first,last,dob,`PK-DEMO-${String(index+1).padStart(4,'0')}`]);
+      people.push({ userId: user.insertId, passengerId: passenger.insertId });
+    }
+    await connection.execute("INSERT INTO users (first_name,last_name,email,password,role,gate_airport_code) VALUES ('Hamza','Iqbal','crew@skywings.com',?,'crew','KHI')", [hash]);
+    for (const airport of airports) await connection.execute('INSERT INTO airports (airport_code, airport_name, city, country) VALUES (?, ?, ?, ?)', airport);
+    for (const [index, model] of ['Airbus A320 (demo cabin)','Airbus A321 (demo cabin)','Boeing 737 (demo cabin)','Airbus A320 (demo cabin)'].entries()) {
+      const [plane] = await connection.execute("INSERT INTO aircraft (model, registration, capacity, status) VALUES (?, ?, 72, 'active')", [model,`AP-SW${String.fromCharCode(65+index)}`]);
+      for (let row = 1; row <= 12; row++) for (const letter of ['A','B','C','D','E','F']) await connection.execute('INSERT INTO seats (aircraft_id, seat_number, seat_class, `row_number`, column_letter) VALUES (?, ?, ?, ?, ?)', [plane.insertId,`${row}${letter}`,row === 1 ? 'first' : row <= 3 ? 'business' : 'economy',row,letter]);
+    }
+    const routes = [['KHI','ISB'],['LHE','KHI'],['ISB','LHE'],['KHI','LHE'],['KHI','ISB'],['KHI','ISB'],['LHE','DXB'],['ISB','DOH'],['KHI','JED'],['PEW','KHI'],['MUX','ISB'],['SKT','RUH'],['UET','KHI'],['LYP','KHI']];
+    const now = Date.now();
+    for (let i = 0; i < 60; i++) {
+      const [from,to] = routes[i % routes.length];
+      const departure = i === 0 ? new Date(now + 3600000) : i === 1 ? new Date(now + 6*3600000) : new Date(now + (24 + i*12)*3600000);
+      const international = ['DXB','DOH','JED','RUH'].includes(to);
+      const arrival = new Date(departure.getTime() + (international ? 4 : 2)*3600000);
+      const fare = international ? 260 : 120;
+      await connection.execute('INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price, business_price, first_class_price, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [`SW${201+i}`,i%4+1,from,to,departure,arrival,fare,fare*1.5,fare*2,i === 6 ? 'delayed' : 'scheduled']);
+    }
+    for (let i = 0; i < 3; i++) await connection.execute("INSERT INTO flights (flight_number, aircraft_id, from_airport_code, to_airport_code, departure_datetime, arrival_datetime, base_price, business_price, first_class_price) VALUES (?, ?, 'KHI','ISB', ?, ?, 120, 180, 240)", [`SW${901+i}`,i+2,new Date(now+3600000),new Date(now+3*3600000)]);
+    await connection.commit();
+  } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
+  async function book(personIndex, flightId, cabin = 'economy', seat = null, extra = []) {
+    const person = people[personIndex];
+    return bookingService.createBooking(person.userId, { flight_id: flightId, class: cabin,
+      idempotency_key: `seed-${personIndex}-${flightId}-${cabin}`,
+      passengers: [{ passenger_id: person.passengerId, ...(seat ? { seat_number: seat } : {}) }, ...extra] });
   }
+  async function paid(personIndex, flightId, cabin, seat, extra) {
+    const booking = await book(personIndex, flightId, cabin, seat, extra);
+    await paymentService.confirmDemoPayment(people[personIndex].userId, booking.booking_id); return booking;
+  }
+  const checked = await paid(0,1,'economy','4A',[{ first_name:'Ayesha',last_name:'Raza',date_of_birth:'2002-03-10',nationality:'Pakistani',seat_number:'4B' }]);
+  await checkInSeed(checked.booking_id, people[0].userId, ['4A','4B']);
+  await paid(0,2,'business','2A');
+  await book(0,4);
+  const expired = await book(0,3,'economy','4C');
+  await db.pool.execute('UPDATE bookings SET reservation_expires_at = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE booking_id = ?', [expired.booking_id]);
+  for (let i = 1; i < people.length; i++) await paid(i, i+7, i%3 === 0 ? 'business' : i%4 === 0 ? 'first' : 'economy', i%3 === 0 ? '2A' : i%4 === 0 ? '1A' : '4A');
+  const moved = await paid(3,5,'economy','4D');
+  const rebookConnection = await db.pool.getConnection();
+  try { await rebookConnection.beginTransaction(); await require('../backend/services/rebookingService').executeRebooking(rebookConnection,moved.booking_id,6,[], 'CUSTOMER_REQUEST', { userId:people[3].userId,role:'user' }, 'seed-rebooking'); await rebookConnection.commit(); }
+  catch(error) { await rebookConnection.rollback(); throw error; } finally { rebookConnection.release(); }
+  const completed = await paid(0,61,'economy','4A');
+  await checkInSeed(completed.booking_id, people[0].userId, ['4A']);
+  const [tokens] = await db.pool.execute('SELECT boarding_token FROM booking_passengers WHERE booking_id = ?', [completed.booking_id]);
+  await db.pool.execute('UPDATE flights SET boarding_open = 1 WHERE flight_id = 61');
+  await require('../backend/services/boardingService').scan(tokens[0].boarding_token,61,{role:'admin',userId:1});
+  await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 30 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 30 DAY), INTERVAL 2 HOUR) WHERE flight_id = 61");
+  const cancelled = await paid(0,62,'economy','4B');
+  await bookingService.cancelBooking(people[0].userId,cancelled.booking_id);
+  await db.pool.execute("UPDATE flights SET status = 'cancelled', departure_datetime = DATE_SUB(NOW(), INTERVAL 15 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 15 DAY), INTERVAL 2 HOUR) WHERE flight_id = 62");
+  const missed = await paid(0,63,'economy',null);
+  await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 7 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 7 DAY), INTERVAL 2 HOUR) WHERE flight_id = 63");
+  await require('../backend/services/lifecycleService').runSweep();
+  await db.pool.execute('UPDATE bookings SET booking_date = DATE_SUB(NOW(), INTERVAL 30 DAY) WHERE booking_id = ?', [completed.booking_id]);
+  await db.pool.execute("INSERT INTO contact_messages (name,email,category,message) VALUES ('Sana Ahmed','sana.ahmed@example.test','feedback','This is a synthetic support inquiry for the Pakistani demo dataset.')");
+  console.log('Pakistani demo data seeded: 14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and lifecycle examples.');
+  return { people, checkedBookingId: checked.booking_id, completedBookingId: completed.booking_id, missedBookingId: missed.booking_id };
 }
-
-if (require.main === module) {
-  seedDatabase()
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1));
-}
-
+if (require.main === module) seedDatabase().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => db.pool.end());
 module.exports = seedDatabase;

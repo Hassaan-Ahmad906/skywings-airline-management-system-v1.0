@@ -1,3 +1,7 @@
+# Deployment notes
+
+Use README.md for the current configuration and verified local workflow. Read ENTERPRISE_READINESS_AUDIT.md before publishing: local regression success is not an operational airline certification. Demo accounts and demo payments must remain in development/test environments; production rejects demo confirmation and refuses active synthetic accounts/default demo passwords at startup. A real payment/refund provider, airport departure-control integration and live telemetry are not integrated. Run npm run db:setup during a controlled upgrade to apply migrations 008–010. The frontend calls same-origin /api; configure frontend/vercel.json to proxy your own backend and set FRONTEND_URL to your actual origins. Do not deploy the synthetic seed as real customer data.
+
 # 🌐 SkyWings Airlines - Cloud Deployment Guide
 
 This guide details how to deploy the **SkyWings Airlines** enterprise platform:
@@ -174,8 +178,8 @@ git push -u origin main
 
 1. Open your live Vercel URL (e.g. `https://skywings-airlines.vercel.app`).
 2. Log in with the pre-seeded credentials:
-   - **Admin Access**: `admin@skywings.com` / `admin123`
-   - **Customer Access**: `user@skywings.com` / `user123` (or any of the 20 pre-seeded accounts)
+   - **Admin Access**: `admin@skywings.com` / `DemoPass123!`
+   - **Customer Access**: `user@skywings.com` / `DemoPass123!` (or any of the 12 synthetic customer accounts)
 3. Test flight booking, interactive seat selection, payment, web check-in, and admin flight management.
 
 ---
