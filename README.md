@@ -130,6 +130,19 @@ The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 28
 
 Sample accounts are for local evaluation. Production startup rejects active known sample accounts and the default demo password.
 
+### Login on a hosted installation
+
+Database migrations preserve hosted users and passwords; they do not copy the local sample accounts. The README sample password will therefore not sign in to a production installation. Use an account registered on that website or credentials provisioned for its database.
+
+An operator with database access can inspect or recover one existing account from an interactive terminal. Configure the database environment for the intended installation first and verify the target printed by the command:
+
+```sh
+npm run account:recover -- --check your-account@example.com
+npm run account:recover -- --reset your-account@example.com
+```
+
+Checking is read-only and reports account existence, role, status and password format without showing the password hash. Reset requires confirmation of the account and twice-entered hidden input for a unique password of at least 12 characters (up to 72 UTF-8 bytes), containing uppercase, lowercase and a number. It preserves the account's role and records, revokes existing sessions and writes a transactional audit. It does not create missing accounts or reactivate suspended ones. Do not send passwords in chat or command arguments, or reset the database to recover a login.
+
 ### Resetting local sample data
 
 ```sh

@@ -46,6 +46,32 @@ async function main(){ let server;
     assert.equal((await db.pool.execute('SELECT COUNT(*) AS count FROM tickets'))[0][0].count,2);
     assert.equal((await req('/boarding/staff',2,{first_name:'Hamza',last_name:'Iqbal',email:'crew@example.test',password:'SecureDemo123!',airport:'KHI'})).status,403);
     assert.equal((await req('/boarding/staff',1,{first_name:'Hamza',last_name:'Iqbal',email:'crew@example.test',password:'SecureDemo123!',airport:'KHI'})).status,201);
+    const recovery = require('../backend/services/accountRecoveryService');
+    const inspected = await recovery.inspect(db.pool, ' PERSON1@EXAMPLE.TEST ');
+    assert.equal(inspected.role, 'admin'); assert.equal(inspected.passwordFormat, 'bcrypt');
+    assert.ok(!('password' in inspected));
+    await assert.rejects(recovery.reset(db.pool, 'person1@example.test', 'DemoPass123!'), /unique password/);
+    await assert.rejects(recovery.reset(db.pool, 'missing@example.test', 'RecoveredAdmin123!'), /Account not found/);
+    await db.pool.execute("UPDATE users SET status = 'suspended' WHERE user_id = 3");
+    await assert.rejects(recovery.reset(db.pool, 'person3@example.test', 'RecoveredAdmin123!'), /inactive or suspended/);
+    await recovery.reset(db.pool, 'PERSON1@EXAMPLE.TEST', 'RecoveredAdmin123!');
+    assert.equal((await req('/auth/check', 1)).status, 401, 'Old admin sessions must be revoked');
+    const wrongPassword = await req('/auth/login', 1, { email: 'person1@example.test', password: 'TestPass123!' });
+    assert.equal(wrongPassword.status, 401);
+    const recoveredLogin = await req('/auth/login', 1, { email: 'person1@example.test', password: 'RecoveredAdmin123!' });
+    assert.equal(recoveredLogin.status, 200); assert.equal(recoveredLogin.data.data.user.role, 'admin');
+    const [[recovered]] = await db.pool.execute('SELECT password,token_version FROM users WHERE user_id = 1');
+    assert.equal(require('bcryptjs').getRounds(recovered.password), 12);
+    const [[resetAudit]] = await db.pool.execute("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'PASSWORD_RESET' AND resource_id = '1'");
+    assert.equal(resetAudit.count, 1);
+    const audit = require('../backend/services/auditService'), originalLog = audit.logEvent;
+    try {
+      audit.logEvent = async () => { throw new Error('Audit unavailable'); };
+      await assert.rejects(recovery.reset(db.pool, 'person1@example.test', 'OtherRecovery123!'), /Audit unavailable/);
+    } finally { audit.logEvent = originalLog; }
+    const [[rolledBack]] = await db.pool.execute('SELECT password,token_version FROM users WHERE user_id = 1');
+    assert.equal(rolledBack.password, recovered.password); assert.equal(rolledBack.token_version, recovered.token_version);
+    console.log('Account recovery passed: private inspection, existing active account only, default-password rejection, preserved admin role, session revocation, authenticated login and audit-failure rollback.');
     console.log('Enterprise workflow checks passed: real return search, multi-city reservation, atomic inventory/payment rollback, idempotency, ownership, expiry, ticket replay and admin-only crew provisioning.');
   } finally {
     if(server) await new Promise(resolve=>server.close(resolve)); await db.pool.end(); const c=await setup.openConnection();

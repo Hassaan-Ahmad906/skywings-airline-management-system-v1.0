@@ -751,9 +751,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // ========== AUTHENTICATION ==========
 
-// Demo Credentials:
-// Admin: admin@skywings.com / admin123
-// User: user@skywings.com / user123
+// Sample credentials are documented in README and apply only to the local seed database.
 
 async function handleLogin(event) {
     event.preventDefault();
