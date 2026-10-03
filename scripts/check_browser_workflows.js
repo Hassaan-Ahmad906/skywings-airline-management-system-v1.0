@@ -46,6 +46,8 @@ async function main() {
       }
     }
     const { context: ctx, page } = await context('user', 1280);
+    // Relative seed flights can depart tomorrow when this check runs near midnight.
+    const [[outboundDate]] = await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date FROM flights WHERE flight_id=1");
     page.on('dialog', dialog => dialog.accept());
     await page.goto(base + '/my-bookings.html', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Boarding Pass', exact: false }).first().click();
@@ -60,7 +62,7 @@ async function main() {
     assert.match(await page.locator('#contactSuccessBanner').innerText(), /Message saved/);
     await page.goto(base + '/flight-search.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#searchFromAirport').selectOption('KHI'); await page.locator('#searchToAirport').selectOption('ISB');
-    await page.locator('#searchDepDate').fill(new Date().toLocaleDateString('en-CA'));
+    await page.locator('#searchDepDate').fill(outboundDate.date);
     await page.locator('#flightSearchForm button[type="submit"]').click();
     await page.locator('.btn-book-flight').first().click();
     await page.locator('[name="passenger_1_firstName"]').fill('Nida'); await page.locator('[name="passenger_1_lastName"]').fill('Ahmed');
@@ -91,7 +93,7 @@ async function main() {
     await page.goto(base+'/flight-search.html',{waitUntil:'domcontentloaded'});
     await page.getByRole('button',{name:'Return',exact:true}).click();
     await page.locator('#searchFromAirport').selectOption('KHI'); await page.locator('#searchToAirport').selectOption('ISB');
-    await page.locator('#searchDepDate').fill(new Date().toLocaleDateString('en-CA')); await page.locator('#searchReturnDate').fill(returnDate.date);
+    await page.locator('#searchDepDate').fill(outboundDate.date); await page.locator('#searchReturnDate').fill(returnDate.date);
     await page.locator('#flightSearchForm button[type="submit"]').click();
     await page.locator('.journey-result-leg').nth(0).locator('.btn-book-flight').first().click(); await page.locator('.journey-result-leg').nth(1).locator('.btn-book-flight').first().click();
     await page.getByRole('button',{name:'Continue with journey',exact:true}).click();
@@ -107,7 +109,7 @@ async function main() {
     const [[legTwo]]=await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date,arrival_datetime FROM flights WHERE flight_id=3");
     const [[legThree]]=await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date FROM flights WHERE from_airport_code='LHE' AND to_airport_code='KHI' AND departure_datetime > ? ORDER BY departure_datetime LIMIT 1",[legTwo.arrival_datetime]);
     await page.goto(base+'/flight-search.html',{waitUntil:'domcontentloaded'}); await page.setViewportSize({width:390,height:900});
-    await page.locator('#searchFromAirport').selectOption('KHI'); await page.locator('#searchToAirport').selectOption('ISB'); await page.locator('#searchDepDate').fill(new Date().toLocaleDateString('en-CA'));
+    await page.locator('#searchFromAirport').selectOption('KHI'); await page.locator('#searchToAirport').selectOption('ISB'); await page.locator('#searchDepDate').fill(outboundDate.date);
     await page.getByRole('button',{name:'Multi-city',exact:true}).click();
     await page.locator('.journey-leg').nth(0).locator('[data-leg-field="from"]').selectOption('ISB'); await page.locator('.journey-leg').nth(0).locator('[data-leg-field="to"]').selectOption('LHE'); await page.locator('.journey-leg').nth(0).locator('[data-leg-field="departure"]').fill(legTwo.date);
     await page.getByRole('button',{name:'+ Add flight leg',exact:true}).click();

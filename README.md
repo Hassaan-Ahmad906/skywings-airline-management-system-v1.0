@@ -1,76 +1,229 @@
-﻿# SkyWings Airlines
+<p align="center">
+  <img src="frontend/images/transparent_logo_clean.PNG" alt="SkyWings logo" width="150">
+</p>
 
-A Node.js, Express, MySQL and vanilla JavaScript airline application. It supports one-way, return and multi-city reservations, cabin-aware inventory, check-in, a dedicated airport crew portal, per-passenger boarding, audit history, rebooking, disruptions and a support inbox. Online confirmation currently uses explicitly labelled development simulation; a live payment provider is not integrated.
+# SkyWings Airline Management System
 
-## Run locally
+A full-stack airline reservation and operations application built with Node.js, Express, MySQL and vanilla JavaScript. SkyWings brings passenger booking, administration and airport gate operations into three dedicated portals.
 
-Use Node.js 22 or newer and MySQL 8. Configure `.env` from `.env.example` with your local database credentials and a random JWT secret. The private local `.env` is already configured in this workspace.
+Customers can plan one-way, return and multi-city journeys, reserve cabin inventory, select seats and check in. Administrators manage flights, disruptions, reports and feedback. Airport crew handle manifests, gate controls and individual passenger boarding.
+
+**Project status:** local workflows are implemented and tested. Payment confirmation is a development simulation; live payments and airline/airport integrations remain required before operational deployment. See the [enterprise readiness audit](ENTERPRISE_READINESS_AUDIT.md).
+
+## Features
+
+| Area | Capabilities |
+| --- | --- |
+| Flight search | One-way, return and multi-city trips; up to six legs and nine passengers; cabin selection, fare/time filters and sorting |
+| Reservations | Server-calculated fares, shared journey references, atomic multi-leg reservations, retry protection and ten-minute unpaid reservation deadlines |
+| Seats and check-in | Cabin-aware availability, temporary server seat holds, check-in, individual tickets and QR boarding passes |
+| Customer portal | Saved passengers, booking history, eligible rebooking/cancellation and support messages |
+| Admin portal | Flight and aircraft management, schedule validation, disruption handling, database-backed reports and crew provisioning |
+| Feedback inbox | Search, pagination, new/reviewed/resolved filters, individual deletion to Trash and restoration |
+| Airport crew portal | Assigned-airport flight access, passenger manifests, gate assignment, boarding open/close, scanning and per-passenger boarding |
+| Audit and access | Role and airport authorization, gate audit history, transactional admin audits, token revocation and request rate limits |
+
+## Technology
+
+- **Frontend:** HTML, CSS and JavaScript, served by Express.
+- **Backend:** Node.js, Express, JWT authentication and bcrypt password hashing.
+- **Database:** MySQL 8, transactional reservations and versioned schema migrations.
+- **Boarding passes:** server-generated QR codes with individual passenger tokens.
+- **Verification:** Node.js regression tests, disposable MySQL workflows and Playwright/Chromium browser checks.
+
+## Getting started
+
+### Prerequisites
+
+- Node.js 22 or newer and npm.
+- A running MySQL 8 server.
+- Local database credentials with permission to create the application database and tables. Integration tests additionally need permission to create and drop disposable test databases.
+
+Run the following commands from the repository root.
+
+### 1. Install dependencies
 
 ```sh
-npm install
+npm ci
+```
+
+### 2. Configure the environment
+
+Copy [.env.example](.env.example) to `.env`:
+
+```sh
+# macOS / Linux
+cp .env.example .env
+```
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+The template contains production/cloud placeholders. Replace them with your local settings before running setup or seeding:
+
+```dotenv
+PORT=3000
+NODE_ENV=development
+
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=your_local_database_user
+DB_PASSWORD=your_local_database_password
+DB_NAME=skywings_airlines
+DB_SSL=false
+DB_CONNECTION_LIMIT=10
+
+JWT_SECRET=replace_with_a_random_secret_generated_below
+JWT_EXPIRES_IN=7d
+FRONTEND_URL=http://localhost:3000
+
+PAYMENT_MODE=demo
+NOTIFICATIONS_ENABLED=false
+DISRUPTION_NOTIFICATION_WEBHOOK_URL=
+N8N_BOOKING_EMAIL_WEBHOOK_URL=
+```
+
+Generate a random JWT secret, then paste its output into `JWT_SECRET`:
+
+```sh
+node -e "console.log(require('node:crypto').randomBytes(48).toString('hex'))"
+```
+
+`.env` is private and excluded from Git. `PAYMENT_MODE=demo` enables development confirmation without collecting money or payment credentials. Use `disabled` to disable that confirmation.
+
+### 3. Set up and seed the database
+
+```sh
 npm run db:setup
 npm run db:seed
+```
+
+Setup creates the schema and applies versioned migrations. Run it again when upgrading an existing installation. Seeding requires development/test mode and demo payments; it skips databases that already contain users.
+
+### 4. Start the application
+
+```sh
 npm start
 ```
 
-Open http://localhost:3000. `npm run dev` uses Node's built-in watch mode.
-
-## Pakistani sample data
-
-The local sample dataset contains 14 accounts (including airport crew), 12 airports, 4 demo aircraft, 288 cabin seats, 63 flights, and 19 bookings. Flights are dated relative to seeding. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik, Sana Ahmed and Ahmed Farooq. Addresses, passport references and support inquiries are synthetic. Aircraft use compact demonstration cabins.
-
-| Role | Name | Email | Demo password |
-| --- | --- | --- | --- |
-| Administrator | Ahmed Farooq | admin@skywings.com | DemoPass123! |
-| Customer | Ali Raza | user@skywings.com | DemoPass123! |
-| Karachi airport crew | Hamza Iqbal | crew@skywings.com | DemoPass123! |
-
-Other customer addresses use `firstname.lastname@example.test` and the same demonstration password. These accounts belong only in a local demo.
-
-`npm run db:reset` resets **only the local development `skywings_airlines` database**. It first writes a private SQL backup under `backups/`, restores it into an isolated database and verifies every table row count, then installs the schema and seeds the sample data. Seeding an already populated database skips existing records. Backups and `.env` are excluded from Git.
-
-The pre-reset backup is `backups/skywings_airlines-2026-10-03T14-45-06-951Z.sql`. To restore it, select a clean database and execute the backup with a MySQL client after stopping the app; its SQL targets `skywings_airlines`.
-
-## Booking behavior
-
-Reservations start unpaid and expire after ten minutes. Development/test confirmation requires `PAYMENT_MODE=demo` and collects no money or payment credentials. Production always rejects demo confirmation. A real payment provider is not integrated.
-
-Check-in opens 24 hours before departure. Selecting a seat creates a server hold in the booked cabin. Assigned seats do not imply completed check-in or boarding. Tickets become USED only when staff record boarding. Each passenger receives a random server-issued token encoded as a QR code. Gate scans require an administrator or assigned airport crew member, an open gate within the 90-minute window, the correct flight, an unused token, a valid issued ticket and an identity confirmation. A group booking is marked BOARDED after every passenger is recorded.
-
-The global payment banner is removed. The confirmation dialog retains accurate payment information. Return and multi-city search uses each leg's airports/date, supports up to six legs and nine passengers, and provides cabin, departure-time, fare and sorting controls. All selected legs reserve in one transaction with a shared journey reference; a failed leg rolls back the whole reservation. Development confirmation of a journey is also atomic. Connecting legs require at least 60 minutes in this application; airport-specific connection rules and interline connections are not implemented. Linked journeys cannot use independent single-leg rebooking because that could invalidate their itinerary. Coordinated journey changes require a future workflow.
-
-Open `/crew-portal.html` for departure control. Crew can search their airport's upcoming flights, see a minimal passenger manifest, assign gates, open/close boarding, scan connected-reader codes or enter tokens, and review gate audit history. Administrators have the same workspace on their dashboard and can create crew accounts with an assigned airport through the portal. Customer registration cannot assign crew privileges. Successful and rejected scans are stored separately in `gate_audit_events`; tokens are never stored in that audit table. This verifies internal application codes, not compatibility with airline departure-control systems or IATA boarding-pass readers.
-
-Dashboard/report requests are read-only. The scheduled worker expires unpaid reservations and records no-shows; only recorded boarding can become completed travel. Unmeasured metrics such as actual on-time performance, fuel efficiency and satisfaction display as unavailable. Charts use stored data.
-
-Flight cancellation updates bookings, tickets, seats and check-in together. An unpaid cancellation does not invent a refund. Demo refunds are explicitly simulated; real paid bookings retain a pending refund until provider processing is implemented.
-
-Rebooking requires an eligible paid booking and preserves the route. Existing check-in and seat assignments are reset. Active itineraries cannot be edited directly: use the authenticated disruption/rebooking APIs. Incompatible aircraft layouts and overlapping schedules are rejected.
-
-## Notifications and support
-
-Contact messages are validated and stored in `contact_messages`, with a reference shown after storage succeeds. The admin inbox supports search, pagination and new/reviewed/resolved filters. Individual messages can be moved to Trash and restored. These changes are recorded in the admin audit; they do not send email. `GET /api/contact`, `PATCH /api/contact/:id`, `DELETE /api/contact/:id` and `POST /api/contact/:id/restore` require admin access.
-
-External notification delivery is disabled by default. Enable `NOTIFICATIONS_ENABLED=true` only with an intentionally configured endpoint:
-
-- `N8N_BOOKING_EMAIL_WEBHOOK_URL` for real paid booking confirmations.
-- `DISRUPTION_NOTIFICATION_WEBHOOK_URL` for disruption notifications.
-
-Demo payments never dispatch external booking notifications. Tests stub or disable delivery. A successful notification status records gateway acceptance; final mailbox delivery is outside this application.
-
-## Verification
+Open [http://localhost:3000](http://localhost:3000). For development with automatic server reloads:
 
 ```sh
-npm test
-npm run test:schema
-npm run test:workflows
-npm run test:seed
-npm run test:ui
-npm run test:browser
-npm run test:enterprise
+npm run dev
+```
+
+The API health endpoint is `GET /api/health`.
+
+## Portals and sample accounts
+
+| Portal | Local address | Sample email | Sample password |
+| --- | --- | --- | --- |
+| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` | `DemoPass123!` |
+| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `DemoPass123!` |
+| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `DemoPass123!` |
+
+Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
+
+The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 bookings**. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik and Ahmed Farooq. Flights are scheduled relative to the time of seeding. Passenger identities, addresses and passport references are synthetic; aircraft have compact demonstration cabins.
+
+Sample accounts are for local evaluation. Production startup rejects active known sample accounts and the default demo password.
+
+### Resetting local sample data
+
+```sh
+npm run db:reset
+```
+
+**This replaces the local application database.** Reset is restricted to the development `skywings_airlines` database on localhost. If an existing database is present, it first saves a private SQL backup under `backups/`, restores it into an isolated database and verifies table row counts before resetting and reseeding. Backups are excluded from Git.
+
+## Workflow rules
+
+- Reservations begin unpaid and expire after ten minutes. Multi-leg reservation and development confirmation succeed or roll back together.
+- Check-in opens 24 hours before departure. Choosing a seat creates a server hold; assigned seats alone do not indicate completed check-in or boarding.
+- Gate scans require an administrator or airport-authorized crew member, an open gate, the correct flight, a valid issued ticket, an unused passenger token and staff identity confirmation. Boarding is permitted within 90 minutes before departure.
+- Each successful scan records one passenger and consumes that passenger's ticket. A group booking becomes boarded only after every passenger is recorded. Successful and rejected scans have separate gate audit records without raw boarding tokens.
+- Connecting journey legs require at least 60 minutes under the application's current policy. Airport-specific connection rules and interline itineraries are not implemented. Independent single-leg rebooking of linked journeys is blocked; coordinated journey changes remain future work.
+- Eligible single-flight rebooking preserves the route and resets prior check-in and seat assignments. Flight cancellation updates linked booking, seat, check-in and ticket records transactionally.
+- Dashboard/report reads do not advance booking states. Unmeasured aviation metrics display as unavailable. Real refunds require provider processing; development refunds are explicitly simulated.
+
+## Notifications
+
+Support messages are validated and stored with a reference. Admin inbox changes are audited and do not send email.
+
+External delivery is disabled by default. To enable it, set `NOTIFICATIONS_ENABLED=true` and configure the applicable endpoint:
+
+| Variable | Purpose |
+| --- | --- |
+| `N8N_BOOKING_EMAIL_WEBHOOK_URL` | Real paid booking confirmations |
+| `DISRUPTION_NOTIFICATION_WEBHOOK_URL` | Disruption notifications |
+
+Demo payments do not dispatch external booking confirmations. Notification success means gateway acceptance; final mailbox delivery is outside the application.
+
+## Tests and verification
+
+Install Chromium before running browser checks:
+
+```sh
+node node_modules/playwright/cli.js install chromium --no-shell
+```
+
+Run the complete verification suite:
+
+```sh
 npm run test:all
 ```
 
-The independent regression suite uses isolated stubs. Database checks create and drop only `skywings_test_*` databases and never change application records. Browser checks require Chromium: `node node_modules/playwright/cli.js install chromium --no-shell`. Browser screenshots are saved privately under `artifacts/`. `test:all` runs the seven checks sequentially, stops on failure, and saves `artifacts/final-test-results.json` and `artifacts/final-test-output.log`.
+| Command | Coverage |
+| --- | --- |
+| `npm test` | Independent security, authorization, inventory and workflow regressions |
+| `npm run test:schema` | Fresh schema, legacy upgrades and repeated migrations |
+| `npm run test:workflows` | Booking, holds, expiry, rebooking, boarding and support workflows |
+| `npm run test:seed` | Sample data, cabin capacity, lifecycle and repeat-seed safety |
+| `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
+| `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry and staff provisioning |
+| `npm run test:browser` | All 14 pages at desktop/mobile widths and complete customer, admin and crew workflows |
 
-`REVIEW_REPORT.md` preserves the original audit. `FIX_PROGRESS.md` records fixes, verification and resume state. `GATE_BOARDING_AUDIT.md` documents the staff workflow and `ENTERPRISE_READINESS_AUDIT.md` records release limits. Production requires database credentials and a JWT secret of at least 32 characters. Startup refuses active synthetic sample accounts or the known default demo password. Real payments, provider refunds, airline/airport integration and live aviation telemetry require separate integrations before operational use. Run `npm run db:setup` on upgrades; migrations 008–010 preserve existing application records while adding inbox, crew/gate and journey features.
+Database/browser checks use disposable `skywings_test_*` databases rather than application records. External delivery is stubbed or disabled. `test:all` runs the seven checks sequentially and stops on failure. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
+
+**Last verified: 3 October 2026.** The independent regression suite has 40 passing tests, including rejection of an outdated database before server/cleanup startup. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. The seven-part suite also covers browser checks at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks cover local application behavior; they do not certify production hosting, payment settlement or airport interoperability.
+
+## Repository structure
+
+```text
+backend/
+  config/           Database configuration
+  middleware/       Authentication, authorization and request controls
+  repositories/     Database access
+  routes/           HTTP API endpoints
+  services/         Reservation, inventory and operations logic
+  workers/          Background processing
+database/
+  schema.sql        Canonical database schema
+  migrations/       Versioned upgrades
+frontend/
+  *.html            Customer, admin and crew pages
+  css/              Shared and operations styling
+  js/               Browser workflows
+scripts/            Setup, seeding, backups and verification
+tests/              Independent regression tests and fixtures
+```
+
+## Deployment and documentation
+
+Read the [enterprise readiness audit](ENTERPRISE_READINESS_AUDIT.md) before planning a production launch. Outstanding work includes live payment/refund integration, airport/DCS interoperability, staff MFA and device controls, production hosting/security, load/failover testing and managed recovery verification. The QR payload currently verifies internal application tokens; it is not an implemented IATA boarding-pass or airport-reader integration.
+
+For Render, use Build Command `npm ci` and Start Command `npm run start:deploy` to apply database migrations before launching. Alternatively, run `npm run db:setup` in a supported pre-deploy step and start with `npm start`. The server refuses an outdated schema before listening or starting cleanup. See the [Render migration troubleshooting instructions](DEPLOYMENT_GUIDE.md#render-missing-reservation-expiry-column) for the `reservation_expires_at` error. Neither migration path resets or seeds hosted data.
+
+| Document | Purpose |
+| --- | --- |
+| [Enterprise readiness audit](ENTERPRISE_READINESS_AUDIT.md) | Release decision, verification evidence and remaining production requirements |
+| [Gate boarding audit](GATE_BOARDING_AUDIT.md) | Crew/admin permissions, boarding controls and operational limits |
+| [Deployment guide](DEPLOYMENT_GUIDE.md) | Hosting configuration guidance; read alongside the readiness audit |
+| [Original review](REVIEW_REPORT.md) | Original findings and their context |
+| [Repair progress](FIX_PROGRESS.md) | Completed fixes, verification and resume checkpoint |
+
+## License
+
+This repository includes the [MIT License](LICENSE).

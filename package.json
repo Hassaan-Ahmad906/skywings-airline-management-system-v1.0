@@ -5,6 +5,7 @@
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
+    "start:deploy": "node scripts/start_deploy.js",
     "dev": "node --watch backend/server.js",
     "test": "node scripts/master_test.js",
     "db:setup": "node scripts/setup_database.js",

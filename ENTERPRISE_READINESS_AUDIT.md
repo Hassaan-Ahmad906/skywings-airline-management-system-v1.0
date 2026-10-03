@@ -13,14 +13,15 @@ Reviewed: 3 October 2026, Asia/Karachi.
 - Added airport-scoped crew access, a dedicated gate portal, equivalent admin controls, gate assignment/open/close, minimal manifests, per-passenger scanning and separate gate audit history.
 - Corrected mobile crew controls and the existing profile grid so page content fits phone widths; long manifests scroll inside their table container.
 - Added non-destructive migrations 008–010 and a production startup check for active synthetic/default-password accounts.
+- Render schema follow-up: added migration 011 for a missing reservation-expiry column, a migration-first deployment command and schema verification before server/worker startup. Disposable MySQL tests preserve an existing booking during recovery. The hosted Render database has not been accessed or deployed from this workspace.
 - Original 26 repairs and their regression coverage are retained. The original pre-reset backup and a new pre-upgrade backup are preserved privately under `backups/`.
 
 ## Test evidence
 
 | Check | Result |
 | --- | --- |
-| Independent regression tests (`npm test`) | 39 passed |
-| Fresh/legacy schema and repeat migrations | Passed |
+| Independent regression tests (`npm test`) | 40 passed, including schema startup protection |
+| Fresh/legacy schema, repeat migrations and missing expiry-column recovery | Passed; existing booking preserved |
 | Booking, hold, expiry, rebooking, notification and support workflows | Passed in disposable MySQL |
 | Return/multi-city ownership, idempotency, capacity, atomic rollback, expiry and ticket replay | Passed in disposable MySQL |
 | Keyboard navigation, date controls, modal focus/Escape/restore | Passed in Chromium |

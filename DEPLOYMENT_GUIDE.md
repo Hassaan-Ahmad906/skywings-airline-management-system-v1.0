@@ -1,6 +1,23 @@
 # Deployment notes
 
-Use README.md for the current configuration and verified local workflow. Read ENTERPRISE_READINESS_AUDIT.md before publishing: local regression success is not an operational airline certification. Demo accounts and demo payments must remain in development/test environments; production rejects demo confirmation and refuses active synthetic accounts/default demo passwords at startup. A real payment/refund provider, airport departure-control integration and live telemetry are not integrated. Run npm run db:setup during a controlled upgrade to apply migrations 008–010. The frontend calls same-origin /api; configure frontend/vercel.json to proxy your own backend and set FRONTEND_URL to your actual origins. Do not deploy the synthetic seed as real customer data.
+Use README.md for the current configuration and verified local workflow. Read ENTERPRISE_READINESS_AUDIT.md before publishing: local regression success is not an operational airline certification. Demo accounts and demo payments must remain in development/test environments; production rejects demo confirmation and refuses active synthetic accounts/default demo passwords at startup. A real payment/refund provider, airport departure-control integration and live telemetry are not integrated. Apply all versioned migrations during upgrades; the server checks schema readiness before listening or starting cleanup. The frontend calls same-origin /api; configure frontend/vercel.json to proxy your own backend and set FRONTEND_URL to your actual origins. Do not deploy the synthetic seed as real customer data.
+
+## Render: missing reservation expiry column
+
+`SeatHoldCleaner background cleanup error: Unknown column 'b.reservation_expires_at' in 'where clause'` means the deployed database is missing a field used by reservation expiry. Updating JavaScript or importing `schema.sql` alone does not alter an existing bookings table.
+
+After pushing the updated migration files and scripts, configure Render with:
+
+| Setting | Value |
+| --- | --- |
+| Build Command | `npm ci` |
+| Start Command | `npm run start:deploy` |
+
+This command applies non-destructive schema upgrades to the configured database before launching the server. Migration 011 also repairs a missing expiry column when earlier migrations were already recorded, and backfills only unpaid reservations with no deadline. Existing deadlines and booking records are preserved. A migration failure prevents startup and prints its cause. This command never resets or seeds the database.
+
+If your plan supports a separate pre-deploy command, use `npm run db:setup` there and keep `npm start` as the start command. [Render documents pre-deploy migrations and their availability on paid services](https://render.com/docs/deploys#pre-deploy-command). Use one of these arrangements. Take a database snapshot before a production upgrade and grant the migration connection the required schema permissions. On multiple instances, run migrations once as a controlled pre-deploy step instead of concurrently on each instance.
+
+Verify that Render's `DB_HOST`, `DB_PORT` and `DB_NAME` point to the intended database. After deployment, check for `Schema and versioned migrations verified` and `SkyWings server running` in the logs, and a successful `/api/health` response. Production account/payment safeguards still apply; resolve any separate startup error as reported. Do not use `db:reset` or sample seeding to repair a hosted database.
 
 # 🌐 SkyWings Airlines - Cloud Deployment Guide
 
@@ -72,7 +89,7 @@ git push -u origin main
      - **Password**: Your generated cluster password
      - **Database**: `skywings_airlines`
 
-4. **Initialize & Seed the TiDB Cloud Database**:
+4. **Initialize or Upgrade the TiDB Cloud Database**:
    - In your local project, update your `.env` file with your TiDB credentials:
      ```env
      DB_HOST=gateway01.us-east-1.prod.aws.tidbcloud.com
@@ -84,9 +101,9 @@ git push -u origin main
      ```
    - Run the automated database initializer from your terminal:
      ```bash
-     npm run db:reset
+     npm run db:setup
      ```
-   - This executes `database/schema.sql` (creating all 17 tables, foreign keys, and indexes) and `scripts/seed_database.js` (seeding Admin + 20 Active Customer Accounts + Airports + Fleet + Flights).
+   - This creates the schema and applies versioned migrations while preserving existing records. It does not seed or reset the hosted database. Use approved production data and provision unique staff credentials.
 
 ---
 
@@ -105,8 +122,8 @@ git push -u origin main
    - **Branch**: `main`
    - **Root Directory**: *(leave blank)*
    - **Runtime**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
+   - **Build Command**: `npm ci`
+   - **Start Command**: `npm run start:deploy` (applies migrations before starting)
    - **Plan**: `Free`
 
 4. **Set Environment Variables in Render**:
@@ -121,7 +138,7 @@ git push -u origin main
    | `DB_PASSWORD` | `your_tidb_password` | TiDB password |
    | `DB_NAME` | `skywings_airlines` | Database name |
    | `DB_SSL` | `true` | Enables TLS 1.2 required by TiDB |
-   | `JWT_SECRET` | `skywings_super_secure_enterprise_key_2026` | Any strong secret |
+   | `JWT_SECRET` | A unique cryptographically random secret | Generate at least 32 characters; never reuse an example secret |
    | `JWT_EXPIRES_IN` | `7d` | Token validity |
    | `FRONTEND_URL` | `https://your-app.vercel.app` | Exact Vercel production URL; required for browser login/registration |
 

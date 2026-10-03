@@ -119,6 +119,7 @@ app.use((err, req, res, next) => {
 async function startServer(port = PORT) {
   const connection = await db.pool.getConnection();
   connection.release();
+  await require('./services/schemaReadiness').verify(db.pool);
   await require('./services/productionGuard').verify(db.pool);
   return new Promise((resolve, reject) => {
     const server = app.listen(port, () => {
@@ -130,7 +131,7 @@ async function startServer(port = PORT) {
   });
 }
 if (require.main === module) startServer().catch(async error => {
-  console.error('Server startup failed:', error.code || error.message);
+  console.error('Server startup failed:', error.code ? `${error.code}: ${error.message}` : error.message);
   seatHoldCleaner.stop();
   await db.pool.end();
   process.exitCode = 1;

@@ -38,3 +38,6 @@ backups/
 artifacts/
 playwright-report/
 test-results/
+FIX_PROGRESS.md
+ENTERPRISE_READINESS_AUDIT.md
+DEPLOYMENT_GUIDE.md

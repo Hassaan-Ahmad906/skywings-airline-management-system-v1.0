@@ -6,6 +6,9 @@ The user subsequently removed the usage-limit constraint and asked to remember c
 
 ## Current feature upgrade and resume state
 
+- Render expiry-column incident COMPLETE in code: added migration 011 to repair bookings.reservation_expires_at, a migration-first npm run start:deploy command, and a schema readiness check before server/worker startup. Updated Render instructions to run migrations instead of resetting/seeding a hosted database. Disposable MySQL checks reproduced the missing column with earlier migration history present, repaired it and preserved the existing booking. Applied migration 011 to the local application after saving backups/skywings_airlines-2026-10-03T18-02-04-471Z.sql; local schema readiness and /api/health passed. No Render account/database was accessed or deployed from this workspace. Hosted recovery still requires pushing these files and redeploying with the documented commands.
+- Render follow-up verification COMPLETE: all seven checks passed with 40 regression tests. Results are in artifacts/final-test-results.json. Corrected a midnight-dependent browser fixture assumption to search the seeded flight's actual departure date. Schema, workflow, seed, keyboard and all 14 desktop/mobile page checks passed. Syntax and Git whitespace checks passed.
+
 - User requested removal of the global demo banner, a better admin feedback inbox with deletion, one-way/return/multi-city search, a dedicated airport crew portal with admin access, and final publishing checks.
 - Global banner removed. Payment confirmation remains accurate because live settlement is not integrated.
 - Inbox complete: search, status filters, pagination, individual Trash deletion and restoration, admin authorization and audit. HTTP/database and browser workflows passed.
@@ -16,7 +19,7 @@ The user subsequently removed the usage-limit constraint and asked to remember c
 - Current port 3000 serves this workspace and has reloaded the updated APIs. Live read-only/API smoke checks confirmed journey search, crew login and KHI-scoped gate access.
 - Production startup rejects active synthetic/sample-password accounts; production never accepts simulated payments.
 - Added GATE_BOARDING_AUDIT.md and ENTERPRISE_READINESS_AUDIT.md. Real payment/refund processing, airport/DCS interoperability, coordinated journey changes, staff MFA and production hosting/recovery/load validation remain explicit release work. No production publishing was performed.
-- Final verification COMPLETE: all seven checks in npm run test:all passed, including 39 independent regressions, schema upgrades, database workflows, seed checks, keyboard accessibility, multi-leg transactions and browser workflows. Results and output are saved under artifacts/.
+- Final verification COMPLETE: all seven checks in npm run test:all passed, now including 40 independent regressions, schema upgrades, database workflows, seed checks, keyboard accessibility, multi-leg transactions and browser workflows. Results and output are saved under artifacts/.
 - A stricter follow-up browser run measures body and document widths and passed all 14 pages at 1440px and 390px. It also verifies selected crew manifests and feedback inboxes on phones. Fixed crew grid sizing and the existing profile layout after this check exposed clipped content; visually reviewed the final crew mobile screenshot.
 - JavaScript syntax, inline scripts, local file links/casing and Git whitespace checks passed; npm audit reported zero vulnerabilities. Local workflow verification is complete. Remaining work is the explicit production integration/operations list in ENTERPRISE_READINESS_AUDIT.md, not a claim of enterprise certification.
 
