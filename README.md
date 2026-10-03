@@ -196,7 +196,7 @@ npm run test:all
 | `npm run test:seed` | Sample data, cabin capacity, lifecycle and repeat-seed safety |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
 | `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry and staff provisioning |
-| `npm run test:browser` | All 14 pages at desktop/mobile widths and complete customer, admin and crew workflows |
+| `npm run test:browser` | All 14 pages at desktop/mobile widths; registration/logout/re-login; complete customer, admin and crew workflows |
 
 Database/browser checks use disposable `skywings_test_*` databases rather than application records. External delivery is stubbed or disabled. `test:all` runs the seven checks sequentially and stops on failure. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
 

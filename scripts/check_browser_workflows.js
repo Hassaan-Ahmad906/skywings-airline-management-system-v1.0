@@ -156,8 +156,25 @@ async function main() {
     assert.ok(await adminPage.evaluate(()=>Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)-innerWidth<=2));
     await adminPage.screenshot({path:path.join(artifacts,'admin-inbox-mobile.png'),fullPage:true});
     await adminCtx.close();
+    for (const width of [1280,390]) {
+      const { context: signupCtx, page: signupPage } = await context(null,width);
+      signupPage.on('dialog', dialog => dialog.accept());
+      const email = `browser.signup.${width}@example.test`, password = 'BrowserSignup123!';
+      await signupPage.goto(base+'/register.html',{waitUntil:'domcontentloaded'});
+      await signupPage.locator('[name="firstName"]').fill('Ali'); await signupPage.locator('[name="lastName"]').fill('Raza');
+      await signupPage.locator('[name="email"]').fill(email); await signupPage.locator('[name="password"]').fill(password); await signupPage.locator('[name="confirmPassword"]').fill(password);
+      await signupPage.getByRole('button',{name:'Create Account',exact:true}).click(); await signupPage.waitForURL('**/user-dashboard.html');
+      if(width===390) await signupPage.getByRole('button',{name:'Toggle navigation',exact:true}).click();
+      await signupPage.getByRole('link',{name:'Logout',exact:true}).click(); await signupPage.waitForURL('**/index.html');
+      await signupPage.goto(base+'/login.html',{waitUntil:'domcontentloaded'});
+      await signupPage.locator('[name="email"]').fill(email); await signupPage.locator('[name="password"]').fill(password);
+      await signupPage.getByRole('button',{name:'Sign In',exact:true}).click(); await signupPage.waitForURL('**/user-dashboard.html');
+      const authenticated = await signupCtx.request.get(base+'/api/auth/check'); assert.equal(authenticated.status(),200);
+      assert.equal((await authenticated.json()).data.user.email,email);
+      await signupCtx.close();
+    }
     assert.deepEqual(errors, []); assert.deepEqual(failures, []);
-    console.log('Browser checks passed: all 14 pages at desktop/mobile widths; one-way, return and three-leg multi-city booking; seat hold/reset, check-in, QR, crew boarding, gate audit, inbox resolve/delete/restore and persisted contact.');
+    console.log('Browser checks passed: all 14 pages at desktop/mobile widths; new account registration/logout/re-login; one-way, return and three-leg multi-city booking; seat hold/reset, check-in, QR, crew boarding, gate audit, inbox resolve/delete/restore and persisted contact.');
   } finally {
     if (browser) await browser.close(); if (server) await new Promise(resolve => server.close(resolve)); await db.pool.end();
     const connection = await setup.openConnection();

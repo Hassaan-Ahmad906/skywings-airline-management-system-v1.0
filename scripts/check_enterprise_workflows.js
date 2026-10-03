@@ -71,6 +71,22 @@ async function main(){ let server;
     } finally { audit.logEvent = originalLog; }
     const [[rolledBack]] = await db.pool.execute('SELECT password,token_version FROM users WHERE user_id = 1');
     assert.equal(rolledBack.password, recovered.password); assert.equal(rolledBack.token_version, recovered.token_version);
+    for (const [email, password] of [['signup.person@example.test','SignupTest123!'], ['A.li.Raza+Travel@gmail.com',' SpacesPassword123! ']]) {
+      const registered = await fetch(base+'/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({firstName:'Ali',lastName:'Raza',email,password,confirmPassword:password})});
+      const registeredBody = await registered.json(); assert.equal(registered.status,201,JSON.stringify(registeredBody));
+      const cookie = registered.headers.get('set-cookie').split(';')[0];
+      const [[beforeLogout]] = await db.pool.execute('SELECT password,token_version FROM users WHERE user_id = ?',[registeredBody.data.userId]);
+      const loggedOut = await fetch(base+'/auth/logout',{method:'POST',headers:{Cookie:cookie}}); assert.equal(loggedOut.status,200);
+      const [[afterLogout]] = await db.pool.execute('SELECT password,token_version FROM users WHERE user_id = ?',[registeredBody.data.userId]);
+      assert.equal(afterLogout.password,beforeLogout.password,'Logout must preserve the password hash');
+      assert.equal(afterLogout.token_version,beforeLogout.token_version+1);
+      const signedIn = await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+      assert.equal(signedIn.status,200,JSON.stringify(await signedIn.json()));
+      const refreshedCookie = signedIn.headers.get('set-cookie').split(';')[0];
+      assert.equal((await fetch(base+'/auth/check',{headers:{Cookie:refreshedCookie}})).status,200);
+      assert.equal((await fetch(base+'/auth/check',{headers:{Cookie:cookie}})).status,401);
+    }
+    console.log('Registration/logout/login passed: new customer accounts, normalized Gmail aliases, exact password preservation and fresh sessions.');
     console.log('Account recovery passed: private inspection, existing active account only, default-password rejection, preserved admin role, session revocation, authenticated login and audit-failure rollback.');
     console.log('Enterprise workflow checks passed: real return search, multi-city reservation, atomic inventory/payment rollback, idempotency, ownership, expiry, ticket replay and admin-only crew provisioning.');
   } finally {
