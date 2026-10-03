@@ -47,6 +47,7 @@ router.get('/list', async (req, res) => {
         f.departure_datetime,
         f.arrival_datetime,
         f.status as flight_status,
+        (${require('../services/metricSql').upcomingBooking}) AS is_upcoming,
         dep.airport_code as from_code,
         dep.airport_name as from_name,
         dep.city as from_city,
@@ -108,13 +109,10 @@ router.get('/list', async (req, res) => {
       ticketMap.get(t.booking_id).push(t);
     });
 
-    const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
-
     const bookingsWithDetails = bookings.map(b => ({
       ...b,
       passengers: passengerMap.get(b.booking_id) || [],
-      tickets: ticketMap.get(b.booking_id) || [],
-      is_upcoming: new Date(b.departure_datetime) >= todayMidnight
+      tickets: ticketMap.get(b.booking_id) || []
     }));
 
     res.json({

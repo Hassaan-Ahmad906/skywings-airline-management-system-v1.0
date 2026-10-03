@@ -1,5 +1,5 @@
 const {spawnSync}=require('node:child_process'),fs=require('node:fs'),path=require('node:path');
-const checks=[['test','master_test.js'],['test:schema','check_schema.js'],['test:workflows','check_workflows.js'],['test:seed','check_seed.js'],['test:ui','check_ui_accessibility.js'],['test:enterprise','check_enterprise_workflows.js'],['test:browser','check_browser_workflows.js']];
+const checks=[['test','master_test.js'],['test:schema','check_schema.js'],['test:workflows','check_workflows.js'],['test:seed','check_seed.js'],['test:ui','check_ui_accessibility.js'],['test:enterprise','check_enterprise_workflows.js'],['test:metrics','check_metrics.js'],['test:browser','check_browser_workflows.js']];
 const directory=path.join(__dirname,'../artifacts');fs.mkdirSync(directory,{recursive:true});
 const report={started_at:new Date().toISOString(),checks:[],passed:false};
 const reportFile=path.join(directory,'final-test-results.json'),logFile=path.join(directory,'final-test-output.log');

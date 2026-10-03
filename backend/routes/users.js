@@ -9,6 +9,10 @@ const router = require('../middleware/asyncRouter')();
 // All user routes require authentication
 router.use(authenticate);
 
+router.get('/stats', async (req,res) => {
+  res.json({success:true,data:await require('../services/metricsService').customerStats(req.user.userId)});
+});
+
 // ========== GET USER PROFILE ==========
 router.get('/profile', async (req, res) => {
   try {

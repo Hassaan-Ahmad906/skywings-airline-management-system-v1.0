@@ -64,7 +64,7 @@
             <div style="margin-bottom: 30px;">
                 <div class="admin-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                     <h3 class="admin-section-title" style="margin: 0;">
-                        <span class="admin-badge-header upcoming">✈️ Today & Upcoming Scheduled Flights</span>
+                        <span class="admin-badge-header upcoming">✈️ Upcoming Flights</span>
                         <span id="upcomingFlightsCountBadge" class="admin-count-pill">0</span>
                     </h3>
                     <div id="upcomingFlightsPagination" class="pagination-controls"></div>
@@ -94,7 +94,7 @@
             <div style="margin-bottom: 20px;">
                 <div class="admin-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                     <h3 class="admin-section-title" style="margin: 0;">
-                        <span class="admin-badge-header past">📜 Past, Departed & Cancelled Flights</span>
+                        <span class="admin-badge-header past">📜 Past &amp; Unavailable Flights</span>
                         <span id="pastFlightsCountBadge" class="admin-count-pill">0</span>
                     </h3>
                     <div id="pastFlightsPagination" class="pagination-controls"></div>
@@ -142,7 +142,7 @@
                 <div class="admin-stat-card">
                     <div class="stat-icon" style="background: rgba(14, 165, 233, 0.15); color: #0ea5e9;">✅</div>
                     <div class="stat-info">
-                        <span class="stat-label">Boarded</span>
+                        <span class="stat-label" title="Confirmed, checked in, boarded and completed bookings">Confirmed Bookings</span>
                         <h3 id="statConfirmedBookings" class="stat-value">--</h3>
                     </div>
                 </div>
@@ -166,6 +166,8 @@
                 <select id="adminBookingStatusFilter" onchange="filterBookings(this.value, 'admin')">
                     <option value="all">All Statuses</option>
                     <option value="confirmed">Confirmed</option>
+                    <option value="checked_in">Checked in</option>
+                    <option value="completed">Completed</option>
                     <option value="boarded">Boarded</option>
                     <option value="missed">Missed</option>
                     <option value="pending">Pending</option>
@@ -186,7 +188,7 @@
             <div style="margin-bottom: 30px;">
                 <div class="admin-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                     <h3 class="admin-section-title" style="margin: 0;">
-                        <span class="admin-badge-header upcoming">📅 Today & Upcoming Flights / Bookings</span>
+                        <span class="admin-badge-header upcoming">📅 Upcoming Bookings</span>
                         <span id="upcomingBookingsCountBadge" class="admin-count-pill">0</span>
                     </h3>
                     <div id="upcomingBookingsPagination" class="pagination-controls"></div>
@@ -217,7 +219,7 @@
             <div style="margin-bottom: 20px;">
                 <div class="admin-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                     <h3 class="admin-section-title" style="margin: 0;">
-                        <span class="admin-badge-header past">📜 Previous / Past Flights / Bookings</span>
+                        <span class="admin-badge-header past">📜 Past &amp; Inactive Bookings</span>
                         <span id="pastBookingsCountBadge" class="admin-count-pill">0</span>
                     </h3>
                     <div id="pastBookingsPagination" class="pagination-controls"></div>

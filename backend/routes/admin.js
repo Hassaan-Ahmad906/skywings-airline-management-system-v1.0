@@ -13,34 +13,7 @@ router.use(requireAdmin);
 router.get('/stats', async (req, res) => {
   try {
 
-    const [totalUsers] = await query('SELECT COUNT(*) as total FROM users WHERE role = "user"');
-    const [totalFlights] = await query('SELECT COUNT(*) as total FROM flights');
-    const [upcomingFlights] = await query(`
-      SELECT COUNT(*) as total FROM flights 
-      WHERE departure_datetime >= DATE(CURRENT_TIMESTAMP) AND LOWER(status) IN ("scheduled", "in_air", "boarding")
-    `);
-    const [allBookings] = await query('SELECT COUNT(*) as total FROM bookings');
-    const [confirmedBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) IN ("confirmed", "checked_in", "boarded", "completed")');
-    const [pendingBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) = "pending"');
-    const [cancelledBookings] = await query('SELECT COUNT(*) as total FROM bookings WHERE LOWER(status) = "cancelled"');
-    const [revenue] = await query('SELECT COALESCE(SUM(total_amount), 0) as revenue FROM bookings WHERE LOWER(status) IN ("confirmed", "checked_in", "boarded", "completed") AND payment_status = "paid"');
-    const [activeAircraft] = await query('SELECT COUNT(*) as total FROM aircraft WHERE status = "active"');
-
-    res.json({
-      success: true,
-      data: {
-        totalUsers: totalUsers.total || 0,
-        totalFlights: totalFlights.total || 0,
-        upcomingFlights: upcomingFlights.total || 0,
-        activeFlights: upcomingFlights.total || 0,
-        totalBookings: allBookings.total || 0,
-        confirmedBookings: confirmedBookings.total || 0,
-        pendingBookings: pendingBookings.total || 0,
-        cancelledBookings: cancelledBookings.total || 0,
-        totalRevenue: parseFloat(revenue.revenue || 0),
-        activeAircraft: activeAircraft.total || 0
-      }
-    });
+    res.json({ success:true, data:await require('../services/metricsService').adminStats() });
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({
@@ -111,6 +84,7 @@ router.get('/flights', async (req, res) => {
         f.departure_datetime,
         f.arrival_datetime,
         f.status,
+        (${require('../services/metricSql').upcomingFlight}) AS is_upcoming,
         f.base_price,
         f.business_price,
         f.first_class_price,
@@ -334,6 +308,7 @@ router.get('/bookings', async (req, res) => {
         f.departure_datetime,
         f.arrival_datetime,
         f.status as flight_status,
+        (${require('../services/metricSql').upcomingBooking}) AS is_upcoming,
         dep.airport_code as from_code,
         dep.airport_name as from_name,
         dep.city as from_city,
@@ -361,17 +336,9 @@ router.get('/bookings', async (req, res) => {
       f.departure_datetime DESC`;
 
     const bookings = await query(sql, params);
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const formattedBookings = (bookings || []).map(b => ({
-      ...b,
-      is_upcoming: new Date(b.departure_datetime) >= startOfToday
-    }));
-
     res.json({
       success: true,
-      data: { bookings: formattedBookings }
+      data: { bookings: bookings || [] }
     });
   } catch (error) {
     console.error('Get bookings error:', error);

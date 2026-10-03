@@ -16,6 +16,7 @@
     "test:ui": "node scripts/check_ui_accessibility.js",
     "test:workflows": "node scripts/check_workflows.js",
     "test:seed": "node scripts/check_seed.js",
+    "test:metrics": "node scripts/check_metrics.js",
     "test:browser": "node scripts/check_browser_workflows.js",
     "test:enterprise": "node scripts/check_enterprise_workflows.js",
     "test:all": "node scripts/check_all.js"

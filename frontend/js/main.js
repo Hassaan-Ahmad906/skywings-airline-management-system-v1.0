@@ -2273,6 +2273,16 @@ function updateElement(id, value) {
     }
 }
 
+function isUpcomingBooking(booking) {
+    if (booking.is_upcoming !== undefined) return Number(booking.is_upcoming) === 1;
+    const status = String(booking.status || '').toUpperCase();
+    const flightStatus = String(booking.flight_status || 'scheduled').toLowerCase();
+    return new Date(booking.departure_datetime) > new Date()
+        && ['scheduled','boarding','delayed'].includes(flightStatus)
+        && (['CONFIRMED','CHECKED_IN','BOARDED'].includes(status)
+            || (status === 'PENDING' && new Date(booking.reservation_expires_at) > new Date()));
+}
+
 async function loadUserDashboardData() {
     // Populate user greeting name immediately if available
     const userNameEl = document.getElementById('userName');
@@ -2284,7 +2294,7 @@ async function loadUserDashboardData() {
     }
 
     try {
-        const bookingsResponse = await apiRequest('/bookings/list');
+        const [bookingsResponse, statsResponse] = await Promise.all([apiRequest('/bookings/list'),apiRequest('/users/stats')]);
         const allBookings = (bookingsResponse && bookingsResponse.data && Array.isArray(bookingsResponse.data.bookings))
             ? bookingsResponse.data.bookings
             : (bookingsResponse && Array.isArray(bookingsResponse.data))
@@ -2295,29 +2305,7 @@ async function loadUserDashboardData() {
 
         const now = new Date();
         
-        // Calculate User Dashboard Stats Dynamically
-        let totalBookingsCount = allBookings.length;
-        let upcomingCount = 0;
-        let completedCount = 0;
-        let totalSpentSum = 0;
-
-        allBookings.forEach(b => {
-            const dep = new Date(b.departure_datetime || b.booking_date);
-            const isFuture = !isNaN(dep) && dep >= now;
-            const status = (b.status || 'pending').toLowerCase();
-            const payment = (b.payment_status || 'pending').toLowerCase();
-
-            if (isFuture && status !== 'cancelled' && status !== 'expired') {
-                upcomingCount++;
-            }
-            if (status === 'completed') {
-                completedCount++;
-            }
-            if (payment === 'paid' && status !== 'cancelled') {
-                const numericAmount = parseFloat(String(b.total_amount || 0).replace(/[^0-9.-]+/g, '')) || 0;
-                totalSpentSum += numericAmount;
-            }
-        });
+        const stats = statsResponse.data;
 
         // Update stats elements if present
         const elTotalBookings = document.getElementById('totalBookings');
@@ -2325,10 +2313,10 @@ async function loadUserDashboardData() {
         const elCompletedTrips = document.getElementById('completedTrips');
         const elTotalSpent = document.getElementById('totalSpent');
 
-        if (elTotalBookings) elTotalBookings.textContent = totalBookingsCount;
-        if (elUpcomingFlights) elUpcomingFlights.textContent = upcomingCount;
-        if (elCompletedTrips) elCompletedTrips.textContent = completedCount;
-        if (elTotalSpent) elTotalSpent.textContent = totalSpentSum.toFixed(2);
+        if (elTotalBookings) elTotalBookings.textContent = stats.totalBookings;
+        if (elUpcomingFlights) elUpcomingFlights.textContent = stats.upcomingFlights;
+        if (elCompletedTrips) elCompletedTrips.textContent = stats.completedTrips;
+        if (elTotalSpent) elTotalSpent.textContent = Number(stats.totalSpent).toFixed(2);
         
         // Sort by departure date (upcoming first)
         const sortedBookings = [...allBookings].sort((a, b) => {
@@ -2339,11 +2327,7 @@ async function loadUserDashboardData() {
         
         // Filter upcoming flights (future departure and active status)
         const upcomingFlights = sortedBookings
-            .filter(b => {
-                const depDate = new Date(b.departure_datetime || b.booking_date);
-                const status = (b.status || '').toLowerCase();
-                return depDate >= now && status !== 'cancelled' && status !== 'expired';
-            })
+            .filter(isUpcomingBooking)
             .slice(0, 3);
         
         const upcomingList = document.getElementById('upcomingFlightsList');
@@ -2418,7 +2402,7 @@ async function loadUserDashboardData() {
                             <td>
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     <button class="btn btn-sm btn-secondary" onclick="viewBookingDetails(${booking.booking_id})">View</button>
-                                    ${rawHtml(displayStatusText === 'pending' && !flightHasPassed ? html`<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : '')}
+                                    ${rawHtml(displayStatusText === 'pending' && isUpcomingBooking(booking) ? html`<button class="btn btn-sm btn-success" style="background: #10b981; color: white; border: none; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;" onclick="triggerPayPendingBooking(${booking.booking_id})">💳 Pay</button>` : '')}
                                 </div>
                             </td>
                         </tr>
@@ -2770,19 +2754,15 @@ async function filterBookings(arg1, arg2) {
                 // Filter by selected tab
                 let filteredBookings = allUserBookings;
                 if (status === 'upcoming') {
-                    filteredBookings = allUserBookings.filter(b => {
-                        const depDate = new Date(b.departure_datetime || b.booking_date);
-                        const bStat = (b.status || '').toLowerCase();
-                        return depDate >= now && bStat !== 'cancelled' && bStat !== 'expired';
-                    });
+                    filteredBookings = allUserBookings.filter(isUpcomingBooking);
                 } else if (status === 'boarded' || status === 'completed') {
-                    filteredBookings = allUserBookings.filter(b => (b.status || '').toLowerCase() === 'boarded' || (b.status || '').toLowerCase() === 'completed');
+                    filteredBookings = allUserBookings.filter(b => (b.status || '').toLowerCase() === status);
                 } else if (status === 'missed') {
                     filteredBookings = allUserBookings.filter(b => (b.status || '').toLowerCase() === 'missed');
                 } else if (status === 'pending') {
                     filteredBookings = allUserBookings.filter(b => (b.status || '').toLowerCase() === 'pending');
-                } else if (status === 'cancelled') {
-                    filteredBookings = allUserBookings.filter(b => (b.status || '').toLowerCase() === 'cancelled' || (b.status || '').toLowerCase() === 'expired');
+                } else if (status === 'cancelled' || status === 'expired') {
+                    filteredBookings = allUserBookings.filter(b => (b.status || '').toLowerCase() === status);
                 }
                 
                 // Sort by booking date (most recent first)
@@ -4006,90 +3986,24 @@ async function loadUserProfile() {
 }
 
 async function updateProfileQuickStats() {
+    // No rewards ledger exists; fares are not evidence of earned miles or tier benefits.
+    for (const id of ['profileSkyMiles','loyaltyMilesBalance']) {
+        const element=document.getElementById(id); if(element) element.textContent='—';
+    }
+    for (const id of ['profileTierName','loyaltyTierName']) {
+        const element=document.getElementById(id); if(element) element.textContent='Not available';
+    }
     try {
-        const [bookingsRes, passengersRes] = await Promise.all([
-            apiRequest('/bookings/list').catch(() => null),
-            apiRequest('/users/passengers').catch(() => null)
-        ]);
-        
-        let bookings = [];
-        if (bookingsRes && bookingsRes.success && Array.isArray(bookingsRes.data.bookings)) {
-            bookings = bookingsRes.data.bookings;
+        const [statsRes,passengersRes]=await Promise.all([apiRequest('/users/stats'),apiRequest('/users/passengers')]);
+        const count=document.getElementById('profileTotalBookings');
+        if(count) count.textContent=statsRes.data.totalBookings;
+        const passengers=document.getElementById('profileSavedPax');
+        if(passengers) passengers.textContent=passengersRes.data.passengers.length;
+    } catch(error) {
+        for(const id of ['profileTotalBookings','profileSavedPax']) {
+            const element=document.getElementById(id); if(element) element.textContent='Unavailable';
         }
-
-        const bookingCountEl = document.getElementById('profileTotalBookings');
-        if (bookingCountEl) {
-            bookingCountEl.textContent = bookings.length;
-        }
-        
-        const paxCountEl = document.getElementById('profileSavedPax');
-        if (paxCountEl && passengersRes && passengersRes.success && Array.isArray(passengersRes.data.passengers)) {
-            paxCountEl.textContent = passengersRes.data.passengers.length;
-        }
-
-        // Dynamically compute user SkyMiles & Tier from flight bookings
-        const totalMiles = bookings.reduce((sum, b) => {
-            const fare = parseFloat(b.total_price || b.total_amount || 450);
-            return sum + Math.round(fare * 10);
-        }, 0);
-
-        const milesEl = document.getElementById('profileSkyMiles');
-        if (milesEl) {
-            milesEl.textContent = totalMiles.toLocaleString();
-        }
-
-        const loyaltyMilesBalanceEl = document.getElementById('loyaltyMilesBalance');
-        if (loyaltyMilesBalanceEl) {
-            loyaltyMilesBalanceEl.textContent = totalMiles.toLocaleString();
-        }
-
-        // Dynamic Frequent Flyer Tier Calculation
-        let tierName = 'SkyClub Blue Member';
-        let currentTierLabel = 'Blue Tier (0)';
-        let nextTierLabel = 'Silver (5,000)';
-        let milesToNext = `${Math.max(0, 5000 - totalMiles).toLocaleString()} miles to Silver`;
-        let progressPercent = Math.min(100, Math.max(10, Math.round((totalMiles / 5000) * 100)));
-
-        if (totalMiles >= 30000) {
-            tierName = 'SkyClub Platinum Elite';
-            currentTierLabel = 'Platinum (30,000+)';
-            nextTierLabel = 'VIP Diamond Status';
-            milesToNext = 'Top Elite Tier Reached';
-            progressPercent = 100;
-        } else if (totalMiles >= 15000) {
-            tierName = 'SkyClub Gold Member';
-            currentTierLabel = 'Gold Tier (15,000)';
-            nextTierLabel = 'Platinum (30,000)';
-            milesToNext = `${Math.max(0, 30000 - totalMiles).toLocaleString()} miles to Platinum`;
-            progressPercent = Math.min(100, Math.max(10, Math.round(((totalMiles - 15000) / 15000) * 100)));
-        } else if (totalMiles >= 5000) {
-            tierName = 'SkyClub Silver Member';
-            currentTierLabel = 'Silver Tier (5,000)';
-            nextTierLabel = 'Gold (15,000)';
-            milesToNext = `${Math.max(0, 15000 - totalMiles).toLocaleString()} miles to Gold`;
-            progressPercent = Math.min(100, Math.max(10, Math.round(((totalMiles - 5000) / 10000) * 100)));
-        }
-
-        const tierNameEl = document.getElementById('profileTierName');
-        if (tierNameEl) tierNameEl.textContent = tierName;
-
-        const loyaltyTierNameEl = document.getElementById('loyaltyTierName');
-        if (loyaltyTierNameEl) loyaltyTierNameEl.textContent = tierName;
-
-        const currentLabelEl = document.getElementById('loyaltyCurrentTierLabel');
-        if (currentLabelEl) currentLabelEl.textContent = currentTierLabel;
-
-        const nextLabelEl = document.getElementById('loyaltyNextTierLabel');
-        if (nextLabelEl) nextLabelEl.textContent = nextTierLabel;
-
-        const milesToNextEl = document.getElementById('loyaltyMilesToNext');
-        if (milesToNextEl) milesToNextEl.textContent = milesToNext;
-
-        const progressBarFillEl = document.getElementById('loyaltyProgressBarFill');
-        if (progressBarFillEl) progressBarFillEl.style.width = `${progressPercent}%`;
-
-    } catch (err) {
-        console.error('Error updating profile quick stats:', err);
+        console.error('Error loading profile statistics:',error);
     }
 }
 
@@ -4834,7 +4748,9 @@ let adminFlightsState = {
     pastList: []
 };
 
+let adminFlightsLoadVersion = 0;
 async function loadAdminFlights(page = 1, searchQuery = '') {
+    const loadVersion = ++adminFlightsLoadVersion;
     const upcomingTbody = document.querySelector('#adminUpcomingFlightsTable tbody');
     const pastTbody = document.querySelector('#adminPastFlightsTable tbody');
     
@@ -4860,19 +4776,20 @@ async function loadAdminFlights(page = 1, searchQuery = '') {
         }
         
         const flights = response.data.flights || [];
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
+        // The API is paginated; include every page in the client-side groups.
+        for (let nextPage=2; nextPage <= response.data.pagination.totalPages; nextPage++) {
+            if (loadVersion !== adminFlightsLoadVersion) return;
+            params.set('page',String(nextPage));
+            const next = await apiRequest(`/admin/flights?${params}`);
+            flights.push(...next.data.flights);
+        }
+        if (loadVersion !== adminFlightsLoadVersion) return;
 
         adminFlightsState.upcomingList = [];
         adminFlightsState.pastList = [];
 
         flights.forEach(flight => {
-            const depTime = flight.departure_datetime ? new Date(flight.departure_datetime) : null;
-            const status = (flight.status || '').toLowerCase();
-            const isCancelled = status === 'cancelled';
-            const isCompleted = status === 'completed';
-
-            if (depTime && !isNaN(depTime) && depTime >= startOfToday && !isCancelled && !isCompleted) {
+            if (Number(flight.is_upcoming) === 1) {
                 adminFlightsState.upcomingList.push(flight);
             } else {
                 adminFlightsState.pastList.push(flight);
@@ -4894,6 +4811,7 @@ async function loadAdminFlights(page = 1, searchQuery = '') {
 
     } catch (error) {
         console.error('Error loading flights:', error);
+        if (loadVersion !== adminFlightsLoadVersion) return;
         const errHtml = html`<tr><td colspan="6" style="text-align: center; color: red; padding: 20px;">⚠️ Error loading flights: ${error.message}</td></tr>`;
         if (upcomingTbody) upcomingTbody.innerHTML = errHtml;
         if (pastTbody) pastTbody.innerHTML = errHtml;
@@ -5054,9 +4972,6 @@ async function loadAdminBookings() {
             let pendingCount = 0;
             let cancelledCount = 0;
             
-            const startOfToday = new Date();
-            startOfToday.setHours(0, 0, 0, 0);
-
             adminBookingsState.allUpcoming = [];
             adminBookingsState.allPast = [];
 
@@ -5071,8 +4986,7 @@ async function loadAdminBookings() {
                 else if (status === 'cancelled') cancelledCount++;
                 else if (status === 'expired') {}
 
-                const depTime = booking.departure_datetime ? new Date(booking.departure_datetime) : new Date(booking.booking_date);
-                if (!isNaN(depTime) && depTime >= startOfToday) {
+                if (isUpcomingBooking(booking)) {
                     adminBookingsState.allUpcoming.push(booking);
                     upcomingCount++;
                 } else {
@@ -5126,10 +5040,7 @@ function applyAdminBookingFilters() {
     const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
 
     const filterFn = (b) => {
-        let bStatus = (b.status || 'pending').toLowerCase();
-        if (bStatus === 'completed') {
-            bStatus = 'boarded';
-        }
+        const bStatus = (b.status || 'pending').toLowerCase();
 
         let matchesStatus = true;
         if (targetStatus !== 'all') {
@@ -5317,7 +5228,7 @@ function renderBookingRowsHelper(bookings, tbodyElement) {
             const group = flightMap.get(key);
             group.bookings.push(b);
             const bStatus = (b.status || '').toLowerCase();
-            if (['confirmed', 'checked_in', 'boarded', 'completed'].includes(bStatus)) {
+            if (String(b.payment_status).toLowerCase() === 'paid') {
                 group.totalRevenue += parseFloat(b.total_amount || 0);
             }
         });
@@ -6094,6 +6005,49 @@ async function deleteAirport(airportCode, linkedFlightsCount) {
     }
 }
 
+function buildReportCsv(type,data,timestamp) {
+    const rows=[['SkyWings Airlines - '+type+' report'],['Generated',timestamp]];
+    const money=value=>'$'+Number(value || 0).toFixed(2);
+    const percent=value=>value === null || value === undefined ? 'Unavailable' : value+'%';
+    if(type==='overview') {
+        rows.push(['Total paid booking value',money(data.revenue.total)],['Monthly paid booking value',money(data.revenue.monthly)],
+            ['Total bookings',data.bookings.total],['Monthly bookings',data.bookings.monthly],
+            ['On-time rate',percent(data.performance.onTimeRate)],['Occupancy rate',percent(data.performance.occupancyRate)],
+            ['Customer satisfaction',data.performance.customerSatisfaction ?? 'Unavailable'],[],['Route','Paid bookings','Paid booking value']);
+        for(const item of data.popularRoutes || []) rows.push([item.route,item.booking_count,money(item.total_revenue)]);
+    } else if(type==='revenue') {
+        rows.push(['Total paid booking value',money(data.totalRevenue)],['Monthly paid booking value',money(data.monthlyRevenue)],
+            ['Growth',percent(data.growth)],[],['Route','Paid booking value']);
+        for(const item of data.revenueByRoute || []) rows.push([item.route,money(item.revenue)]);
+        rows.push([],['Month','Paid booking value']);
+        for(const item of data.revenueTrend || []) rows.push([item.month,money(item.revenue)]);
+    } else if(type==='bookings') {
+        rows.push(['Total bookings',data.totalBookings],['Monthly bookings',data.monthlyBookings],['Growth',percent(data.growth)],[],['Status','Bookings']);
+        for(const item of data.bookingStatus || []) rows.push([item.status,item.count]);
+        rows.push([],['Month','Bookings']);
+        for(const item of data.bookingTrend || []) rows.push([item.month,item.count]);
+        rows.push([],['Flight','From','To','Total bookings','Confirmed bookings','Cancelled bookings','Paid booking value']);
+        for(const item of data.bookingsByFlight || []) rows.push([item.flight_number,item.from_city,item.to_city,item.total_bookings,item.confirmed_bookings,item.cancelled_bookings,money(item.total_revenue)]);
+    } else if(type==='routes') {
+        rows.push(['Route','Paid bookings','Paid booking value']);
+        for(const item of data.popularRoutes || []) rows.push([item.route,item.booking_count,money(item.revenue)]);
+        rows.push([],['Route','Average paid fare per passenger']);
+        for(const item of data.routePerformance || []) rows.push([item.route,money(item.avg_price)]);
+        rows.push([],['Route','Paid booking value']);
+        for(const item of data.routeRevenue || []) rows.push([item.route,money(item.revenue)]);
+    } else if(type==='performance') {
+        rows.push(['On-time rate',percent(data.onTimePerformance.rate)],['Total flights',data.onTimePerformance.total],
+            ['Delayed flights',data.onTimePerformance.delayed],['Cancelled flights',data.onTimePerformance.cancelled],
+            ['Occupancy rate',percent(data.occupancy.rate)],['Booked seats',data.occupancy.booked],['Total seats',data.occupancy.total],
+            ['Customer satisfaction',data.customerSatisfaction.average ?? 'Unavailable'],['Average flight duration',data.efficiency.avgFlightTime]);
+    } else throw new Error('Invalid report type');
+    return rows.map(row=>row.map(value=>{
+        let text=String(value ?? 'Unavailable');
+        if(typeof value==='string' && /^[=+@-]/.test(text)) text="'"+text;
+        return '"'+text.replace(/"/g,'""')+'"';
+    }).join(',')).join('\r\n')+'\r\n';
+}
+
 async function exportReport(type) {
     try {
         let endpoint = '';
@@ -6139,121 +6093,7 @@ async function exportReport(type) {
                 minute: '2-digit' 
             });
             
-            switch(type) {
-                case 'overview':
-                    csv = `SKYWINGS AIRLINES - OVERVIEW REPORT\n`;
-                    csv += `=====================================\n`;
-                    csv += `Generated: ${timestamp}\n`;
-                    csv += `Report Type: Overview Statistics\n\n`;
-                    
-                    csv += `REVENUE SUMMARY\n`;
-                    csv += `---------------\n`;
-                    const totalRev = data.revenue?.total || data.totalRevenue || 0;
-                    const monthlyRev = data.revenue?.monthly || data.monthlyRevenue || 0;
-                    csv += `Total Revenue (All Time),$${totalRev.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-                    csv += `Monthly Revenue (Current Month),$${monthlyRev.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
-                    
-                    csv += `BOOKING SUMMARY\n`;
-                    csv += `---------------\n`;
-                    const totalBk = data.bookings?.total || data.totalBookings || 0;
-                    const monthlyBk = data.bookings?.monthly || data.monthlyBookings || 0;
-                    csv += `Total Bookings (All Time),${totalBk.toLocaleString()}\n`;
-                    csv += `Monthly Bookings (Current Month),${monthlyBk.toLocaleString()}\n\n`;
-                    
-                    csv += `PERFORMANCE METRICS\n`;
-                    csv += `-------------------\n`;
-                    csv += `On-Time Rate,${data.performance?.onTimeRate || data.onTimeRate || 0}%\n`;
-                    csv += `Occupancy Rate,${data.performance?.occupancyRate || 0}%\n`;
-                    csv += `Customer Satisfaction,${data.performance?.customerSatisfaction || 0}/5\n\n`;
-                    
-                    if (data.popularRoutes && data.popularRoutes.length > 0) {
-                        csv += `POPULAR ROUTES (Top ${data.popularRoutes.length})\n`;
-                        csv += `-----------------------------------\n`;
-                        csv += `Rank,Route,Number of Bookings\n`;
-                        data.popularRoutes.forEach((route, index) => {
-                            csv += `${index + 1},${route.route},${route.booking_count}\n`;
-                        });
-                    }
-                    break;
-                    
-                case 'revenue':
-                    csv = `SKYWINGS AIRLINES - REVENUE REPORT\n`;
-                    csv += `==================================\n`;
-                    csv += `Generated: ${timestamp}\n`;
-                    csv += `Report Type: Revenue Analysis\n\n`;
-                    
-                    csv += `REVENUE SUMMARY\n`;
-                    csv += `---------------\n`;
-                    csv += `Total Revenue (All Time),$${(data.totalRevenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-                    csv += `Monthly Revenue (Current Month),$${(data.monthlyRevenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-                    csv += `Growth Rate,${data.growth || 0}%\n\n`;
-                    
-                    if (data.revenueByRoute && data.revenueByRoute.length > 0) {
-                        csv += `REVENUE BY ROUTE\n`;
-                        csv += `----------------\n`;
-                        csv += `Rank,Route,Revenue (USD)\n`;
-                        data.revenueByRoute.forEach((route, index) => {
-                            csv += `${index + 1},${route.route},$${parseFloat(route.revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-                        });
-                    }
-                    break;
-                    
-                case 'bookings':
-                    csv = `SKYWINGS AIRLINES - BOOKINGS REPORT\n`;
-                    csv += `===================================\n`;
-                    csv += `Generated: ${timestamp}\n`;
-                    csv += `Report Type: Booking Analysis\n\n`;
-                    
-                    csv += `BOOKING SUMMARY\n`;
-                    csv += `---------------\n`;
-                    csv += `Total Bookings (All Time),${(data.totalBookings || 0).toLocaleString()}\n`;
-                    csv += `Monthly Bookings (Current Month),${(data.monthlyBookings || 0).toLocaleString()}\n`;
-                    csv += `Growth Rate,${data.growth || 0}%\n\n`;
-                    
-                    if (data.bookingStatus && data.bookingStatus.length > 0) {
-                        csv += `BOOKING STATUS BREAKDOWN\n`;
-                        csv += `------------------------\n`;
-                        csv += `Status,Count,Percentage\n`;
-                        const total = data.totalBookings || 0;
-                        data.bookingStatus.forEach(status => {
-                            const percentage = total > 0 ? ((status.count / total) * 100).toFixed(2) : 0;
-                            csv += `${status.status.charAt(0).toUpperCase() + status.status.slice(1)},${status.count},${percentage}%\n`;
-                        });
-                    }
-                    break;
-                    
-                case 'routes':
-                    csv = `SKYWINGS AIRLINES - ROUTES REPORT\n`;
-                    csv += `=================================\n`;
-                    csv += `Generated: ${timestamp}\n`;
-                    csv += `Report Type: Route Analysis\n\n`;
-                    
-                    if (data.popularRoutes && data.popularRoutes.length > 0) {
-                        csv += `POPULAR ROUTES\n`;
-                        csv += `--------------\n`;
-                        csv += `Rank,Route,Number of Bookings,Total Revenue (USD)\n`;
-                        data.popularRoutes.forEach((route, index) => {
-                            csv += `${index + 1},${route.route},${route.booking_count || 0},$${parseFloat(route.revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-                        });
-                    } else {
-                        csv += `No route data available.\n`;
-                    }
-                    break;
-                    
-                case 'performance':
-                    csv = `SKYWINGS AIRLINES - PERFORMANCE REPORT\n`;
-                    csv += `======================================\n`;
-                    csv += `Generated: ${timestamp}\n`;
-                    csv += `Report Type: Performance Metrics\n\n`;
-                    
-                    csv += `PERFORMANCE METRICS\n`;
-                    csv += `-------------------\n`;
-                    csv += `On-Time Rate,${data.onTimeRate || 0}%\n`;
-                    csv += `Occupancy Rate,${data.occupancyRate || 0}%\n`;
-                    csv += `Customer Satisfaction,${data.customerSatisfaction || 0}/5\n`;
-                    csv += `Average Flight Efficiency,${data.flightEfficiency || 'N/A'}\n`;
-                    break;
-            }
+            csv = buildReportCsv(type,data,timestamp);
             
             // Create and download CSV file
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -6334,9 +6174,9 @@ function renderLineChart(containerId, data) {
     });
     
     // Create SVG path for line
-    let pathD = `M ${points[0].x}% ${points[0].y}%`;
+    let pathD = `M ${points[0].x} ${points[0].y}`;
     for (let i = 1; i < points.length; i++) {
-        pathD += ` L ${points[i].x}% ${points[i].y}%`;
+        pathD += ` L ${points[i].x} ${points[i].y}`;
     }
     
     container.innerHTML = html`
@@ -6540,7 +6380,7 @@ async function loadBookingsReport() {
             const growthEl = document.getElementById('bookingTrendSummary');
             if (growthEl) {
                 const sign = data.growth >= 0 ? '+' : '';
-                growthEl.innerHTML = html`<p>Growth: ${sign}${data.growth || 0}% this month</p>`;
+                growthEl.innerHTML = data.growth === null ? '<p>No previous-month baseline</p>' : html`<p>Growth: ${sign}${data.growth}% this month</p>`;
             }
             
             // Render booking trend line chart (simulated 6 months)
@@ -6652,8 +6492,8 @@ async function loadPerformanceReport() {
             if (onTimeList) {
                 onTimeList.innerHTML = html`
                     <div class="performance-item">
-                        <span>On-Time</span>
-                        <span class="performance-value">${data.onTimePerformance.onTime} flights</span>
+                        <span>On-time departures</span>
+                        <span class="performance-value">Not recorded</span>
                     </div>
                     <div class="performance-item">
                         <span>Delayed</span>
@@ -6712,7 +6552,7 @@ async function loadPerformanceReport() {
             if (efficiencyList) {
                 efficiencyList.innerHTML = html`
                     <div class="performance-item">
-                        <span>Average Flight Time</span>
+                        <span>Average scheduled duration</span>
                         <span class="performance-value">${data.efficiency.avgFlightTime}</span>
                     </div>
                     <div class="performance-item">

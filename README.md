@@ -178,6 +178,22 @@ External delivery is disabled by default. To enable it, set `NOTIFICATIONS_ENABL
 
 Demo payments do not dispatch external booking confirmations. Notification success means gateway acceptance; final mailbox delivery is outside the application.
 
+## Dashboard and report values
+
+Dashboards and reports share the same metric definitions. Administrator cards cover all users; customer cards and profiles cover only the signed-in customer. Booking counts represent individual flight booking records, including each leg of a multi-city or return booking. Crew views cover the staff member's assigned departure airport.
+
+| Value | Definition |
+| --- | --- |
+| Total bookings | All stored booking states, including cancelled, expired and missed records |
+| Confirmed bookings | Confirmed, checked-in, boarded and completed records; exact-state filters remain separate |
+| Upcoming bookings | Future scheduled/boarding/delayed flights with active bookings or unexpired unpaid reservations |
+| Upcoming flights | Future scheduled/boarding/delayed flights assigned to active aircraft |
+| Paid booking value / customer spending | Amounts marked paid, including missed bookings and cancelled bookings awaiting a refund; unpaid and refunded records are excluded |
+| Occupancy | Paid confirmed/checked-in/boarded/completed passengers divided by aircraft capacity across non-cancelled flights, shown to two decimal places |
+| Average route fare | Recorded paid amounts divided by their passenger count, rather than today's advertised flight price |
+
+Paid booking value reflects application records; local simulated confirmation is not payment settlement or an accounting revenue ledger. On-time performance, ratings and loyalty balances show unavailable when their source data is absent. Growth shows unavailable without a previous-month baseline. Report CSV exports use the same values and preserve unavailable fields. Flight management loads all API pages before displaying its grouped totals; search results cannot be overwritten by an older delayed response.
+
 ## Tests and verification
 
 Install Chromium before running browser checks:
@@ -200,11 +216,12 @@ npm run test:all
 | `npm run test:seed` | Sample data, capacity, lifecycle, repeat-seed safety, login for all 14 accounts and portal/new-customer re-login after logout |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
 | `npm run test:enterprise` | Multi-leg ownership, retry protection, capacity, rollback, expiry, staff provisioning, account recovery and private login diagnostics |
+| `npm run test:metrics` | Dashboard/report/customer reconciliation, occupancy and recorded fares, exact-state filters, all flight pages and desktop/mobile checks in different time zones |
 | `npm run test:browser` | All 14 pages at desktop/mobile widths; signup/logout/re-login, password controls, stale session roles and HTML/clean URL redirects; complete customer, admin and crew workflows |
 
-Database/browser checks use disposable `skywings_test_*` databases rather than application records. External delivery is stubbed or disabled. `test:all` runs the seven checks sequentially and stops on failure. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
+Database/browser checks use disposable `skywings_test_*` databases rather than application records. External delivery is stubbed or disabled. `test:all` runs the eight checks sequentially and stops on failure. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
 
-**Last verified: 3 October 2026.** The independent regression suite has 40 passing tests, including rejection of an outdated database before server/cleanup startup. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. The seven-part suite also covers browser checks at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks cover local application behavior; they do not certify production hosting, payment settlement or airport interoperability.
+**Last verified: 4 October 2026.** The independent regression suite has 44 passing tests, including schema startup protection, accurate CSV fields, valid SVG charts and stale-search response protection. All eight checks passed; metrics checks cover 510 flights, state/payment/expiry exclusions, customer ownership and browser reconciliation in Pakistan and US time zones. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. Full browser checks cover all 14 pages at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks do not certify production hosting, payment settlement or airport interoperability.
 
 ## Repository structure
 
