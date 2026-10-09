@@ -5,6 +5,7 @@ const bookingService = require('../backend/services/bookingService');
 const paymentService = require('../backend/services/paymentService');
 const stateMachine = require('../backend/services/bookingStateMachine');
 const seatAllocation = require('../backend/services/seatAllocationService');
+const { accounts, customerEmail, emailDomain } = require('../backend/config/demoSeed');
 const names = [
   ['Ali','Raza','Karachi'], ['Ayesha','Khan','Lahore'], ['Hassan','Ahmed','Islamabad'],
   ['Fatima','Malik','Rawalpindi'], ['Usman','Iqbal','Peshawar'], ['Sana','Ahmed','Multan'],
@@ -43,24 +44,23 @@ async function seedDatabase(options = {}) {
   if (publicDemo) publicConfig.validateEnvironment();
   const [[existing]] = await db.pool.execute('SELECT COUNT(*) AS count FROM users');
   if (existing.count) { console.log(`Database contains users; seeding skipped. Use ${publicDemo ? 'db:reset:public-demo -- --reset' : 'db:reset'} for a fresh demo dataset.`); return { skipped: true }; }
-  const hash = await bcrypt.hash('DemoPass123!', 10);
-  const hashes = publicDemo ? Object.fromEntries(await Promise.all(Object.entries(publicConfig.accounts).map(async ([role,account]) => [role,await bcrypt.hash(account.password,10)]))) : { admin:hash,user:hash,crew:hash };
+  const hashes = Object.fromEntries(await Promise.all(Object.entries(accounts).map(async ([role,account]) => [role,await bcrypt.hash(account.password,10)])));
   const people = [];
   const planeIds = [], flightIds = [];
   let adminId;
   const connection = await db.pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [admin] = await connection.execute("INSERT INTO users (first_name, last_name, email, password, role, address) VALUES ('Ahmed','Farooq',?,?,'admin','Demo airline office, Karachi, Pakistan')", [publicDemo ? publicConfig.accounts.admin.email : 'admin@skywings.com',hashes.admin]);
+    const [admin] = await connection.execute("INSERT INTO users (first_name, last_name, email, password, role, address) VALUES ('Ahmed','Farooq',?,?,'admin','Demo airline office, Karachi, Pakistan')", [accounts.admin.email,hashes.admin]);
     adminId = admin.insertId;
     for (const [index, [first,last,city]] of names.entries()) {
-      const email = index === 0 ? (publicDemo ? publicConfig.accounts.user.email : 'user@skywings.com') : `${first}.${last}@${publicDemo ? 'public-demo.example.com' : 'example.test'}`.toLowerCase();
+      const email = customerEmail(first, last, index);
       const dob = `${1988 + index}-05-15`;
       const [user] = await connection.execute('INSERT INTO users (first_name, last_name, email, password, date_of_birth, address) VALUES (?, ?, ?, ?, ?, ?)', [first,last,email,hashes.user,dob,`Demo neighbourhood, ${city}, Pakistan`]);
       const [passenger] = await connection.execute("INSERT INTO passengers (user_id, first_name, last_name, date_of_birth, passport_number, nationality, is_saved) VALUES (?, ?, ?, ?, ?, 'Pakistani', 1)", [user.insertId,first,last,dob,`PK-DEMO-${String(index+1).padStart(4,'0')}`]);
       people.push({ userId: user.insertId, passengerId: passenger.insertId });
     }
-    await connection.execute("INSERT INTO users (first_name,last_name,email,password,role,gate_airport_code) VALUES ('Hamza','Iqbal',?,?,'crew','KHI')", [publicDemo ? publicConfig.accounts.crew.email : 'crew@skywings.com',hashes.crew]);
+    await connection.execute("INSERT INTO users (first_name,last_name,email,password,role,gate_airport_code) VALUES ('Hamza','Iqbal',?,?,'crew','KHI')", [accounts.crew.email,hashes.crew]);
     for (const airport of airports) await connection.execute('INSERT INTO airports (airport_code, airport_name, city, country) VALUES (?, ?, ?, ?)', airport);
     for (const [index, model] of ['Airbus A320 (demo cabin)','Airbus A321 (demo cabin)','Boeing 737 (demo cabin)','Airbus A320 (demo cabin)'].entries()) {
       const [plane] = await connection.execute("INSERT INTO aircraft (model, registration, capacity, status) VALUES (?, ?, 72, 'active')", [model,`AP-SW${String.fromCharCode(65+index)}`]);
@@ -118,7 +118,7 @@ async function seedDatabase(options = {}) {
   await db.pool.execute("UPDATE flights SET status = 'completed', departure_datetime = DATE_SUB(NOW(), INTERVAL 7 DAY), arrival_datetime = DATE_ADD(DATE_SUB(NOW(), INTERVAL 7 DAY), INTERVAL 2 HOUR) WHERE flight_id = ?", [flightIds[62]]);
   await require('../backend/services/lifecycleService').runSweep();
   await db.pool.execute('UPDATE bookings SET booking_date = DATE_SUB(NOW(), INTERVAL 30 DAY) WHERE booking_id = ?', [completed.booking_id]);
-  await db.pool.execute("INSERT INTO contact_messages (name,email,category,message) VALUES ('Sana Ahmed',?,'feedback','This is a synthetic support inquiry for the Pakistani demo dataset.')", [publicDemo ? 'sana.ahmed@public-demo.example.com' : 'sana.ahmed@example.test']);
+  await db.pool.execute("INSERT INTO contact_messages (name,email,category,message) VALUES ('Sana Ahmed',?,'feedback','This is a synthetic support inquiry for the Pakistani demo dataset.')", [`sana.ahmed@${emailDomain}`]);
   console.log('Pakistani demo data seeded: 14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and lifecycle examples.');
   return { people, checkedBookingId: checked.booking_id, completedBookingId: completed.booking_id, missedBookingId: missed.booking_id };
 }

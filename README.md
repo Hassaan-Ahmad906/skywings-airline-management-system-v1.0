@@ -118,9 +118,9 @@ The API health endpoint is `GET /api/health`.
 
 ## Portals and sample accounts
 
-### Isolated public demo on TiDB
+### Shared local and hosted demo accounts
 
-The separate `skywings_public_demo` TiDB database contains synthetic Pakistani passengers, bookings and flights. These are its actual portal credentials:
+Local `db:seed` and the isolated TiDB `db:public-demo` use the same [seed implementation](scripts/seed_database.js) and [account configuration](backend/config/demoSeed.js). Both create the same synthetic Pakistani passengers, bookings, fleet, cabin seats, fares and routes. Use these credentials on either freshly seeded demo:
 
 | Portal | Email | Password |
 | --- | --- | --- |
@@ -128,7 +128,13 @@ The separate `skywings_public_demo` TiDB database contains synthetic Pakistani p
 | Administrator: Ahmed Farooq | `demo.admin@public-demo.example.com` | `DemoAdmin2026!` |
 | Airport crew: Hamza Iqbal, Karachi (`KHI`) | `demo.crew@public-demo.example.com` | `DemoCrew2026!` |
 
-These accounts authenticate only in the separate demo application. The current Vercel website uses `skywings_airlines` and has different staff credentials. The demo is prepared for a separate Render service; its public URL will be added after deployment. All demo accounts are shared and all payment confirmations are simulated.
+All demo accounts are shared and payment confirmations are simulated. The other 11 seeded customers use lowercase `firstname.lastname@public-demo.example.com` emails and the customer password above. The current Vercel website uses the primary `skywings_airlines` database with different staff credentials; this demo table does not apply to that website.
+
+Both demo seeds contain **14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 bookings**. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik and Ahmed Farooq. Passenger identities, addresses and passport references are synthetic; aircraft have compact demonstration cabins. Flight dates are relative to each seed run. Generated IDs, password hashes, boarding tokens and booking references differ between installations; reservations also expire and booking states advance over time.
+
+### Isolated public demo on TiDB
+
+The separate `skywings_public_demo` TiDB database already contains the shared dataset and credentials above. The demo is prepared for a separate Render service; its public URL will be added after deployment.
 
 To run the prepared demo locally with its private TiDB connection:
 
@@ -165,27 +171,25 @@ The following hosted portal accounts also exist in the actual TiDB database; the
 
 These hosted staff accounts control the current booking and gate records. Public credentials for all roles require a separate demo deployment with isolated synthetic records. Database connection values such as `DB_USER` and `DB_PASSWORD` are separate from website account credentials and belong in private environment configuration.
 
-### Local development credentials
+### Local development portals
 
-Run `npm run db:setup` and `npm run db:seed` against a fresh local development database before using these credentials:
+Run `npm run db:setup` and `npm run db:seed` against a fresh local development database, then use the shared demo credentials above:
 
-| Portal | Local address | Sample email | Password |
-| --- | --- | --- | --- |
-| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) | `user@skywings.com` | `DemoPass123!` |
-| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) | `admin@skywings.com` | `DemoPass123!` |
-| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) | `crew@skywings.com` | `DemoPass123!` |
+| Portal | Local address |
+| --- | --- |
+| Customer | [Customer dashboard](http://localhost:3000/user-dashboard.html) |
+| Administrator | [Admin dashboard](http://localhost:3000/admin-dashboard.html) |
+| Airport crew | [Gate operations](http://localhost:3000/crew-portal.html) |
 
-**`DemoPass123!` works only with the local seeded accounts in this table; it does not authenticate the hosted TiDB portal accounts.** The TiDB reseed creates separate accounts with unique private passwords. Editing this README does not change database passwords; the public hosted customer samples above have been provisioned separately.
+Existing local databases from earlier versions retain their old accounts because seeding skips a database containing users. To adopt the shared sample data, configure `.env` for localhost and follow [Resetting local sample data](#resetting-local-sample-data). That command backs up and verifies the previous local database before replacing it. Deploying an update or editing this README does not rewrite existing passwords.
 
 Sign in through the [login page](http://localhost:3000/login.html); the application redirects each role to its portal. The sample crew member, Hamza Iqbal, is assigned to Karachi (`KHI`). Administrators retain gate operations on their dashboard and can create crew accounts with an assigned departure airport. Public registration creates customer accounts.
 
-The Pakistani sample dataset contains **14 accounts, 12 airports, 4 aircraft, 288 seats, 63 flights and 19 bookings**. Names include Ali Raza, Ayesha Khan, Hassan Ahmed, Fatima Malik and Ahmed Farooq. Flights are scheduled relative to the time of seeding. Passenger identities, addresses and passport references are synthetic; aircraft have compact demonstration cabins.
-
-The local default credentials are for local evaluation. Production startup rejects the known local default passwords on the three portal accounts and active synthetic `.test` accounts.
+Production startup rejects active demo-domain and `.test` accounts, and known published passwords on the legacy portal accounts. Operator account recovery also refuses the published demo passwords.
 
 ### Login on a hosted installation
 
-The public hosted customer credentials are listed above. For the private accounts created by the TiDB reseed, including hosted admin and crew, use `artifacts/tidb-sample-accounts.json` on the operator's computer. Their passwords differ from the local demo password. This private credentials file, environment file and SQL backups must remain outside Git.
+The public hosted customer credentials are listed above. For the primary database's private accounts created by the TiDB reseed, including hosted admin and crew, use `artifacts/tidb-sample-accounts.json` on the operator's computer. Their passwords differ from the shared demo credentials. This private credentials file, environment file and SQL backups must remain outside Git.
 
 Database migrations preserve hosted users and passwords; they do not copy the local sample accounts. Use an account registered on that website or credentials provisioned for its database.
 
@@ -212,6 +216,8 @@ npm run db:reset
 
 ### Reseeding TiDB while preserving history
 
+This operator workflow targets the primary `skywings_airlines` installation. It preserves historical records and creates private accounts and a 240-flight operational schedule, so it intentionally differs from the shared 63-flight synthetic demo. To provision or refresh the synchronized server demo, use `db:public-demo` or `db:reset:public-demo -- --reset` with `.env.public-demo` instead. Data is never copied between the primary installation and either demo.
+
 Configure the private local `.env` with the intended TiDB connection and `DB_SSL=true`. Create a consistent snapshot and verify its contents by restoring it into a temporary schema:
 
 ```sh
@@ -237,6 +243,7 @@ Unique passwords are written to the private `artifacts/tidb-sample-accounts.json
 - Gate scans require an administrator or airport-authorized crew member, an open gate, the correct flight, a valid issued ticket, an unused passenger token and staff identity confirmation. Boarding is permitted within 90 minutes before departure.
 - Each successful scan records one passenger and consumes that passenger's ticket. A group booking becomes boarded only after every passenger is recorded. Successful and rejected scans have separate gate audit records without raw boarding tokens.
 - Connecting journey legs require at least 60 minutes under the application's current policy. Airport-specific connection rules and interline itineraries are not implemented. Independent single-leg rebooking of linked journeys is blocked; coordinated journey changes remain future work.
+- Journey search uses the selected calendar day in the browser's time zone, including daylight-saving transitions. This keeps results consistent with displayed dates on both local MySQL and UTC-based TiDB.
 - Eligible single-flight rebooking preserves the route and resets prior check-in and seat assignments. Flight cancellation updates linked booking, seat, check-in and ticket records transactionally.
 - Dashboard/report reads do not advance booking states. Unmeasured aviation metrics display as unavailable. Real refunds require provider processing; development refunds are explicitly simulated.
 
@@ -289,6 +296,7 @@ npm run test:all
 | `npm run test:schema` | Fresh schema, legacy upgrades and repeated migrations |
 | `npm run test:workflows` | Booking, holds, expiry, rebooking, boarding and support workflows |
 | `npm run test:seed` | Sample data, capacity, lifecycle, repeat-seed safety, login for all 14 accounts and portal/new-customer re-login after logout |
+| `npm run test:seed -- --compare-public-demo` | Optional TiDB fixture comparison: fresh disposable seed versus existing isolated demo; profiles, all 14 passwords, fleet, airports, seats, routes/fares/durations, booking amounts and feedback |
 | `npm run test:tidb-seed` | Optional cloud/disposable-schema check: backup drift refusal, rollback, preserved financial/ticket records, retired sessions, production-safe credentials and non-overlapping new flights |
 | `npm run test:public-demo` | Isolated TiDB demo: three-role login/logout, portal browser checks, report reconciliation, primary-token rejection and unchanged primary records |
 | `npm run test:ui` | Keyboard navigation, date controls and modal focus behavior |
@@ -298,7 +306,9 @@ npm run test:all
 
 The eight checks in `test:all` use disposable `skywings_test_*` databases rather than application records. The optional `test:public-demo` uses the isolated `skywings_public_demo` database for its authentication/browser checks and reads the primary records to verify they stay unchanged. External delivery is stubbed or disabled. Results, logs and screenshots are saved under the Git-ignored `artifacts/` directory.
 
-**Last verified: 4 October 2026.** The independent regression suite has 48 passing tests, including public-demo isolation and UTC parsing for TiDB deadlines. The earlier eight-check run passed; follow-up checks also passed for the original seed on disposable TiDB and the isolated public demo's three portal roles, browser views, report totals and token separation. Metrics checks cover 510 flights, state/payment/expiry exclusions, customer ownership and browser reconciliation in Pakistan and US time zones. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. Full browser checks cover all 14 pages at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks do not certify production hosting, payment settlement or airport interoperability.
+The optional seed comparison requires `.env` to connect to the TiDB instance containing `skywings_public_demo`, with read access to that schema and permission to create/drop a disposable test schema. It never resets the server demo. It compares fixture content while allowing deployment-specific dates, random identifiers and time-driven booking states. If shared-demo users have changed the data, a mismatch is reported; any reset remains an explicit operator action.
+
+**Last verified: 4 October 2026.** The independent regression suite has 51 passing tests, including public-demo isolation, UTC parsing for TiDB deadlines, Pakistan/daylight-saving search boundaries and safe seat-selection controls during delayed or failed hold requests. The shared seed was compared against the actual isolated TiDB demo: all 14 passwords and the checked profiles, airports, aircraft, seats, flight routes/fares/durations, booking amounts and feedback matched. Fresh seeded accounts and a newly registered customer passed logout/re-login. The isolated demo's three portal roles, browser views, report totals and token separation passed; primary users, bookings and tickets remained unchanged, and its production account guard passed. The earlier eight-check run passed. Metrics checks cover 510 flights, state/payment/expiry exclusions, customer ownership and browser reconciliation in Pakistan and US time zones. Schema checks reproduce and repair the missing reservation-expiry column while preserving an existing booking. Full browser checks cover all 14 pages at 1440px and 390px. The dependency audit reported zero vulnerabilities during the feature-upgrade audit. These checks do not certify production hosting, payment settlement or airport interoperability.
 
 ## Repository structure
 

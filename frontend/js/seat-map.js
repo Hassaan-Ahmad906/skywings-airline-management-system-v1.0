@@ -2,6 +2,15 @@ let seatSelectionBusy = false;
 let seatHoldTimerInterval = null;
 const selectedSeatHolds = new Map();
 
+function setSeatSelectionBusy(busy) {
+    seatSelectionBusy = busy;
+    for (const action of ['confirmSeats()', 'resetSeats()']) {
+        const button = document.querySelector(`button[onclick="${action}"]`);
+        if (button) button.disabled = busy;
+    }
+    document.getElementById('seatMap')?.setAttribute('aria-busy', String(busy));
+}
+
 function seatSessionId() {
     const key = `checkin_session_${currentBooking.booking_id}`;
     let session = sessionStorage.getItem(key);
@@ -12,6 +21,8 @@ function seatSessionId() {
 async function initializeSeatMap() {
     const seatMap = document.getElementById('seatMap');
     if (!seatMap || !currentBooking) return;
+    const alreadyBusy = seatSelectionBusy;
+    setSeatSelectionBusy(true);
     clearInterval(seatHoldTimerInterval);
     selectedSeats = [];
     selectedSeatHolds.clear();
@@ -57,11 +68,14 @@ async function initializeSeatMap() {
         info.setAttribute('aria-live', 'polite'); seatMap.after(info);
         updateSeatCount();
         seatHoldTimerInterval = setInterval(() => {
+            if (seatSelectionBusy) return;
             if ([...selectedSeatHolds.values()].some(h => new Date(h.expires_at) <= new Date())) initializeSeatMap();
             else updateSeatCount();
         }, 1000);
     } catch (error) {
         seatMap.textContent = error.message || 'Unable to load seats. Please retry.';
+    } finally {
+        if (!alreadyBusy) setSeatSelectionBusy(false);
     }
 }
 
@@ -70,7 +84,7 @@ async function selectSeat(element) {
     const seat = element.dataset.seat;
     const selected = selectedSeats.includes(seat);
     if (!selected && selectedSeats.length >= maxSeatsAllowed) { alert(`Select exactly ${maxSeatsAllowed} seat(s). Deselect a seat first.`); return; }
-    seatSelectionBusy = true;
+    setSeatSelectionBusy(true);
     element.disabled = true;
     try {
         if (selected) {
@@ -94,7 +108,7 @@ async function selectSeat(element) {
         element.setAttribute('aria-pressed', String(!selected));
         updateSeatCount();
     } catch (error) { alert(error.message); await initializeSeatMap(); }
-    finally { element.disabled = false; seatSelectionBusy = false; }
+    finally { element.disabled = false; setSeatSelectionBusy(false); }
 }
 
 function updateSeatCount() {

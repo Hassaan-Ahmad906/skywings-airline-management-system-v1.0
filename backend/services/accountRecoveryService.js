@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const audit = require('./auditService');
+const { publishedPasswords, emailDomain } = require('../config/demoSeed');
 
 async function normalizeEmail(email) {
   const req = { body: { email } };
@@ -11,7 +12,7 @@ async function normalizeEmail(email) {
 
 function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72 || !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) throw new Error('Use a password of at least 12 characters, no more than 72 UTF-8 bytes, with uppercase, lowercase and a number');
-  if (password === 'DemoPass123!') throw new Error('Choose a unique password rather than the published sample password');
+  if (publishedPasswords.includes(password)) throw new Error('Choose a unique password rather than the published sample password');
 }
 
 async function inspect(pool, email) {
@@ -27,7 +28,7 @@ async function inspect(pool, email) {
 async function reset(pool, email, password) {
   email = await normalizeEmail(email);
   validatePassword(password);
-  if (process.env.NODE_ENV === 'production' && email.endsWith('.test')) throw new Error('Synthetic accounts cannot be recovered for production use');
+  if (process.env.NODE_ENV === 'production' && (email.endsWith('.test') || email.endsWith(`@${emailDomain}`))) throw new Error('Synthetic accounts cannot be recovered for production use');
   const hash = await bcrypt.hash(password, 12);
   const connection = await pool.getConnection();
   try {

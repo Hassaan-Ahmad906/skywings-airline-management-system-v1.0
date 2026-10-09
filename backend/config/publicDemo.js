@@ -1,9 +1,5 @@
 const databaseName = 'skywings_public_demo';
-const accounts = {
-  admin:{ email:'demo.admin@public-demo.example.com',password:'DemoAdmin2026!' },
-  user:{ email:'demo.user@public-demo.example.com',password:'DemoUser2026!' },
-  crew:{ email:'demo.crew@public-demo.example.com',password:'DemoCrew2026!' }
-};
+const { accounts } = require('./demoSeed');
 function validateEnvironment(env=process.env) {
   if(env.PUBLIC_DEMO!=='true'||env.DB_NAME!==databaseName) throw new Error('Public demo requires PUBLIC_DEMO=true and the isolated skywings_public_demo database');
   if(!env.JWT_SECRET||env.JWT_SECRET.length<32) throw new Error('Public demo requires its own random JWT secret');

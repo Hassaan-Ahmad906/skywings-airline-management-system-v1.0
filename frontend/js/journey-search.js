@@ -1,5 +1,10 @@
 let journeyType = 'oneway', journeySearch = null, journeyChoices = [], journeyAirports = [], journeySearchVersion = 0;
 function localJourneyDate(date = new Date()) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
+function journeyDateOffsets(value) {
+    const start = new Date(value + 'T00:00:00'), end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { utc_offset_minutes:start.getTimezoneOffset(), end_utc_offset_minutes:end.getTimezoneOffset() };
+}
 document.addEventListener('DOMContentLoaded', async () => {
     if (!document.getElementById('flightSearchForm')) return;
     document.getElementById('searchDepDate').min = localJourneyDate();
@@ -50,6 +55,7 @@ async function handleJourneySearch(event) {
     const legs = [{ from:form.elements.from.value, to:form.elements.to.value, departure:form.elements.departure.value }];
     if (journeyType === 'return') legs.push({ from:legs[0].to,to:legs[0].from,departure:document.getElementById('searchReturnDate').value });
     if (journeyType === 'multicity') document.querySelectorAll('.journey-leg').forEach(row=>legs.push(Object.fromEntries([...row.querySelectorAll('[data-leg-field]')].map(el=>[el.dataset.legField,el.value]))));
+    legs.forEach(leg => Object.assign(leg, journeyDateOffsets(leg.departure)));
     const results = document.getElementById('searchResults'), notice = document.getElementById('journeySearchStatus');
     const version = ++journeySearchVersion;
     results.style.display = 'block'; document.getElementById('journeySummary').hidden = true; document.getElementById('flightsList').textContent = 'Finding available flights for each leg…'; button.disabled = true; notice.textContent = ''; journeyChoices = []; journeySearch = null;

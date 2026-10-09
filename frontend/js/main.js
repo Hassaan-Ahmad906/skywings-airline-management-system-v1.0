@@ -3329,9 +3329,7 @@ async function confirmSeats() {
         return;
     }
     
-    seatSelectionBusy = true;
-    const confirmButton = document.querySelector('button[onclick="confirmSeats()"]');
-    if (confirmButton) confirmButton.disabled = true;
+    setSeatSelectionBusy(true);
     try {
         const response = await apiRequest('/checkin/confirm', {
             method: 'POST',
@@ -3397,14 +3395,13 @@ async function confirmSeats() {
         // Don't redirect to login for other errors - just show the error message
         alert(errorMsg);
     } finally {
-        seatSelectionBusy = false;
-        if (confirmButton) confirmButton.disabled = false;
+        setSeatSelectionBusy(false);
     }
 }
 
 async function resetSeats() {
     if (seatSelectionBusy) return;
-    seatSelectionBusy = true;
+    setSeatSelectionBusy(true);
     try {
         for (const hold of selectedSeatHolds.values()) await apiRequest(`/seat-holds/${hold.hold_id}`, { method: 'DELETE' });
         selectedSeats = [];
@@ -3412,7 +3409,7 @@ async function resetSeats() {
         alert(error.message || 'Unable to release selected seats. Please retry.');
     } finally {
         await initializeSeatMap();
-        seatSelectionBusy = false;
+        setSeatSelectionBusy(false);
     }
 }
 

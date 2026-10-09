@@ -2,15 +2,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const { accounts: demoAccounts } = require('../backend/config/demoSeed');
 const name = `skywings_test_browser_${process.pid}`;
 process.env.DB_NAME = name; process.env.NODE_ENV = 'test'; process.env.PAYMENT_MODE = 'demo'; process.env.NOTIFICATIONS_ENABLED = 'false';
 const setup = require('./databaseSetup');
 const db = require('../backend/config/database');
 async function main() {
-  let server, browser;
+  let server, browser, workflowError, activePage;
   try {
     await setup({ database: name }); await require('./seed_database')();
-    await db.pool.execute("INSERT INTO flights (flight_number,aircraft_id,from_airport_code,to_airport_code,departure_datetime,arrival_datetime,base_price,business_price,first_class_price) VALUES ('SW650',4,'ISB','KHI',DATE_ADD(NOW(),INTERVAL 26 HOUR),DATE_ADD(NOW(),INTERVAL 28 HOUR),120,180,240)");
+    await db.pool.execute("INSERT INTO flights (flight_number,aircraft_id,from_airport_code,to_airport_code,departure_datetime,arrival_datetime,base_price,business_price,first_class_price) SELECT 'SW650',aircraft_id,'ISB','KHI',DATE_ADD(NOW(),INTERVAL 26 HOUR),DATE_ADD(NOW(),INTERVAL 28 HOUR),120,180,240 FROM aircraft WHERE registration='AP-SWD'");
     server = await require('../backend/server').startServer(0);
     const base = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ channel: 'chromium', headless: true });
@@ -19,9 +20,10 @@ async function main() {
     async function context(role, width) {
       const context = await browser.newContext({ viewport: { width, height: 900 }, timezoneId: 'Asia/Karachi' });
       if (role) {
-        const response = await context.request.post(base + '/api/auth/login', { data: { email: role === 'admin' ? 'admin@skywings.com' : role === 'crew' ? 'crew@skywings.com' : 'user@skywings.com', password: 'DemoPass123!' } }); assert.equal(response.status(), 200);
+        const response = await context.request.post(base + '/api/auth/login', { data: demoAccounts[role] }); assert.equal(response.status(), 200);
       }
       const page = await context.newPage();
+      activePage = page;
       page.on('pageerror', error => errors.push(error.message));
       page.on('response', response => { if (response.url().includes('/api/') && response.status() >= 400 && response.status() !== 401) failures.push(`${response.status()} ${new URL(response.url()).pathname}`); });
       return { context, page };
@@ -45,14 +47,26 @@ async function main() {
         await ctx.close();
       }
     }
+    console.log('Desktop/mobile page and overflow checks passed for all three roles and public pages.');
     const { context: ctx, page } = await context('user', 1280);
+    async function browserDate(value) {
+      return page.evaluate(instant => {
+        const date = new Date(instant);
+        return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+      }, value.toISOString());
+    }
     // Relative seed flights can depart tomorrow when this check runs near midnight.
-    const [[outboundDate]] = await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date FROM flights WHERE flight_id=1");
+    const [[outboundDate]] = await db.pool.execute("SELECT departure_datetime FROM flights WHERE flight_number='SW201'");
+    outboundDate.date = await browserDate(outboundDate.departure_datetime);
     page.on('dialog', dialog => dialog.accept());
     await page.goto(base + '/my-bookings.html', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Boarding Pass', exact: false }).first().click();
     const pass = page.locator('#boardingPassModalOverlay'); await pass.waitFor();
     await pass.locator('img.bp-qr-image').waitFor();
+    await page.waitForFunction(() => {
+      const img = document.querySelector('#boardingPassModalOverlay img.bp-qr-image');
+      return img?.complete && img.naturalWidth > 0;
+    });
     assert.ok(await pass.locator('img.bp-qr-image').evaluate(img => img.complete && img.naturalWidth > 0));
     await page.keyboard.press('Escape'); await pass.waitFor({ state: 'hidden' });
     await page.goto(base + '/user-about-contact.html', { waitUntil: 'domcontentloaded' });
@@ -87,9 +101,15 @@ async function main() {
     await page.getByRole('button', { name: 'Confirm Seats', exact: true }).click();
     await page.locator('#checkinSuccess').waitFor({ state: 'visible' });
     await page.locator('#boardingPass img.bp-qr-image').waitFor();
+    await page.waitForFunction(() => {
+      const img = document.querySelector('#boardingPass img.bp-qr-image');
+      return img?.complete && img.naturalWidth > 0;
+    });
     assert.ok(await page.locator('#boardingPass img.bp-qr-image').evaluate(img => img.complete && img.naturalWidth > 0));
     await page.screenshot({ path: path.join(artifacts, 'completed-checkin.png'), fullPage: true });
-    const [[returnDate]] = await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date FROM flights WHERE flight_number='SW650'");
+    console.log('Customer reservation, payment, seat hold/reset, check-in and loaded QR images passed.');
+    const [[returnDate]] = await db.pool.execute("SELECT departure_datetime FROM flights WHERE flight_number='SW650'");
+    returnDate.date = await browserDate(returnDate.departure_datetime);
     await page.goto(base+'/flight-search.html',{waitUntil:'domcontentloaded'});
     await page.getByRole('button',{name:'Return',exact:true}).click();
     await page.locator('#searchFromAirport').selectOption('KHI'); await page.locator('#searchToAirport').selectOption('ISB');
@@ -106,8 +126,10 @@ async function main() {
     const journeyPaymentNavigation = page.waitForEvent('framenavigated', { predicate: frame => frame === page.mainFrame() && frame.url().endsWith('/my-bookings.html') });
     await page.getByRole('button',{name:'Confirm demo booking'}).click(); await journeyPaymentResponse; await journeyPaymentNavigation; await page.waitForLoadState('domcontentloaded');
     const [paidReturn]=await db.pool.execute('SELECT status FROM bookings WHERE itinerary_id=?',[returnBookings[0].itinerary_id]); assert.ok(paidReturn.every(b=>b.status==='CONFIRMED'));
-    const [[legTwo]]=await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date,arrival_datetime FROM flights WHERE flight_id=3");
-    const [[legThree]]=await db.pool.execute("SELECT DATE_FORMAT(departure_datetime,'%Y-%m-%d') AS date FROM flights WHERE from_airport_code='LHE' AND to_airport_code='KHI' AND departure_datetime > ? ORDER BY departure_datetime LIMIT 1",[legTwo.arrival_datetime]);
+    const [[legTwo]]=await db.pool.execute("SELECT departure_datetime,arrival_datetime FROM flights WHERE flight_number='SW203'");
+    legTwo.date = await browserDate(legTwo.departure_datetime);
+    const [[legThree]]=await db.pool.execute("SELECT departure_datetime FROM flights WHERE from_airport_code='LHE' AND to_airport_code='KHI' AND departure_datetime > ? ORDER BY departure_datetime LIMIT 1",[legTwo.arrival_datetime]);
+    legThree.date = await browserDate(legThree.departure_datetime);
     await page.goto(base+'/flight-search.html',{waitUntil:'domcontentloaded'}); await page.setViewportSize({width:390,height:900});
     await page.locator('#searchFromAirport').selectOption('KHI'); await page.locator('#searchToAirport').selectOption('ISB'); await page.locator('#searchDepDate').fill(outboundDate.date);
     await page.getByRole('button',{name:'Multi-city',exact:true}).click();
@@ -121,6 +143,7 @@ async function main() {
     await page.getByRole('button',{name:'Continue with journey',exact:true}).click(); await page.locator('[name="passenger_1_firstName"]').fill('Hina'); await page.locator('[name="passenger_1_lastName"]').fill('Aslam');
     await page.getByRole('button',{name:/Reserve & Hold/}).click(); await page.waitForURL('**/my-bookings.html');
     const [[multiCount]]=await db.pool.execute("SELECT COUNT(*) AS count FROM bookings b JOIN booking_passengers bp ON bp.booking_id=b.booking_id JOIN passengers p ON p.passenger_id=bp.passenger_id WHERE p.first_name='Hina' AND b.status='PENDING'"); assert.equal(multiCount.count,3);
+    console.log('Return and mobile multi-city booking workflows passed.');
     await ctx.close();
     const { context: staffCtx, page: staffPage } = await context('crew', 1280);
     staffPage.on('dialog', dialog => dialog.accept());
@@ -227,10 +250,24 @@ async function main() {
     }
     assert.deepEqual(errors, []); assert.deepEqual(failures, []);
     console.log('Browser checks passed: all 14 pages at desktop/mobile widths; signup/logout/re-login, password visibility, inline login support references, stale roles and authenticated redirects on HTML/clean URLs for all roles; one-way, return and three-leg multi-city booking; seat hold/reset, check-in, QR, crew boarding, gate audit, inbox resolve/delete/restore and persisted contact.');
+  } catch (error) {
+    workflowError = error;
+    console.error('Browser workflow failed at ' + (activePage?.url() || 'setup'));
+    if (activePage && !activePage.isClosed()) {
+      try { await activePage.screenshot({ path: path.join(__dirname, '../artifacts/browser-workflow-failure.png'), fullPage: true }); }
+      catch (_) { /* Preserve the workflow error if diagnostic capture fails. */ }
+    }
+    throw error;
   } finally {
+    require('../backend/services/seatHoldCleaner').stop();
     if (browser) await browser.close(); if (server) await new Promise(resolve => server.close(resolve)); await db.pool.end();
-    const connection = await setup.openConnection();
-    try { if (!/^skywings_test_browser_\d+$/.test(name)) throw new Error('Unsafe browser cleanup target'); await connection.query(`DROP DATABASE IF EXISTS \`${name}\``); } finally { await connection.end(); }
+    try {
+      const connection = await setup.openConnection();
+      try { if (!/^skywings_test_browser_\d+$/.test(name)) throw new Error('Unsafe browser cleanup target'); await connection.query(`DROP DATABASE IF EXISTS \`${name}\``); } finally { await connection.end(); }
+    } catch (error) {
+      console.error(`Disposable browser database cleanup failed: ${error.code || error.message} (${name})`);
+      if (!workflowError) throw error;
+    }
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
